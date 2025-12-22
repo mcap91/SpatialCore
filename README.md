@@ -3,6 +3,7 @@
 **Standardized spatial statistics for computational biology.**
 
 License & Commercial Use SpatialCore is licensed under the Apache License 2.0. This means you are free to use, modify, and distribute this software, including for commercial products. However, the SpatialCore name and trademarks are reserved to ensure the community can rely on the "Standardized" quality of the core library.
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
@@ -96,7 +97,6 @@ SpatialCore integrates seamlessly with:
 - [scanpy](https://scanpy.readthedocs.io/) - Single-cell analysis
 - [squidpy](https://squidpy.readthedocs.io/) - Spatial omics analysis
 - [spatialdata](https://spatialdata.scverse.org/) - Spatial data structures
-- [CellTypist](https://www.celltypist.org/) - Cell type annotation
 - [Seurat](https://satijalab.org/seurat/) - R integration
 
 ## Package Philosophy
