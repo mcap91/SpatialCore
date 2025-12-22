@@ -2,125 +2,132 @@
 
 **Standardized spatial statistics for computational biology.**
 
-License & Commercial Use SpatialCore is licensed under the Apache License 2.0. This means you are free to use, modify, and distribute this software, including for commercial products. However, the SpatialCore name and trademarks are reserved to ensure the community can rely on the "Standardized" quality of the core library.
-
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/spatialcore.svg)](https://pypi.org/project/spatialcore/)
+[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 ---
 
-## The Problem - NEEDS UPDATE
+## 🎯 The Mission
 
-We spend too much time re-implementing basic spatial statistics.
+### The Problem
+Spatial biology analysis is fragmented. Implementations of basic statistics often differ between languages (R vs Python) and even between packages, making reproducibility difficult and benchmarking impossible. We spend too much time wondering if a result is biological or an artifact of the implementation.
 
-## The Solution - NEEDS UPDATE
+### The Solution
+SpatialCore serves as a **"ground truth" engineering layer**. It provides robust, standardized implementations of core spatial statistics that ensure identical results across platforms, wrapping high-performance libraries where available.
 
-A thin, robust wrapper around standard libraries to ensure a Python user and an R user get the exact same result for the same biological question.
-
-## The Goal - NEEDS UPDATE
-
-Not novel math—just better, standardized engineering for the community.
+### The Goal
+To make spatial analysis engineering boring, so you can focus on the exciting biology. **Standardized. Scalable. Reproducible.**
 
 ---
 
-## Installation
+## 📦 Installation
 
 ```bash
 pip install spatialcore
 ```
 
-With optional dependencies:
+**Optional Dependencies:**
+
 ```bash
-# CellTypist integration
+# For CellTypist automated annotation
 pip install spatialcore[celltypist]
 
-# R integration via rpy2
+# For R/Seurat integration
 pip install spatialcore[r]
 
-# All optional dependencies
+# Install everything
 pip install spatialcore[all]
 ```
 
-## Quick Start
+---
+
+## 🚀 Quick Start
 
 ```python
 import scanpy as sc
 import spatialcore as sp
 
-# Load your spatial data (Xenium, CosMx, Visium, etc.)
+# 1. Load your spatial data (Xenium, CosMx, Visium, etc.)
 adata = sc.read_h5ad("spatial_data.h5ad")
 
-# Spatial autocorrelation
+# 2. Spatial Autocorrelation
+# Calculate Moran's I for a specific gene
 sp.spatial.morans_i(adata, gene="CD8A", spatial_key="spatial")
+
+# Calculate Lee's L bivariate autocorrelation (e.g., co-localization)
 sp.spatial.lees_l(adata, gene_x="CD8A", gene_y="CD4", spatial_key="spatial")
 
-# Domain identification
+# 3. Define Neighborhoods & Domains
+# Compute spatial domains using Leiden clustering on spatial graph
 sp.clustering.compute_domains(adata, method="leiden", resolution=0.5)
+
+# Calculate physical distances between different tissue domains
 sp.clustering.domain_distance(adata, domain_key="domain")
 
-# Spatial NMF
+# 4. Spatial Factorization
+# Decompose expression into spatially coherent programs
 sp.nmf.spatial_nmf(adata, n_components=10)
 ```
 
-## Features
+---
 
-| Module | Description |
+## 🧩 Modules & Features
+
+| Module | Features |
 |--------|-------------|
-| `spatialcore.spatial` | Moran's I, Lee's L with HH/LL/HL/LH classification |
-| `spatialcore.clustering` | Domains, neighborhoods, niches, community detection |
-| `spatialcore.nmf` | Spatial non-negative matrix factorization |
-| `spatialcore.diffusion` | Diffusion maps, pseudotime analysis |
-| `spatialcore.ontology` | Cell ontology conversion and mapping |
-| `spatialcore.annotation` | CellTypist wrappers, custom model training, benchmarking |
-| `spatialcore.r_bridge` | Seurat integration via rpy2 |
+| **`spatialcore.spatial`** | • Global & Local Moran's I<br>• Bivariate Lee's L<br>• HH/LL/HL/LH Local Classification |
+| **`spatialcore.clustering`** | • Spatial Domain Identification<br>• Niche Analysis<br>• Neighborhood definition |
+| **`spatialcore.nmf`** | • Spatially-aware Non-negative Matrix Factorization<br>• Pattern extraction |
+| **`spatialcore.diffusion`** | • Diffusion Maps<br>• Spatial Pseudotime Analysis |
+| **`spatialcore.ontology`** | • Cell Ontology (CL) Mapping<br>• Standardization of labels |
+| **`spatialcore.annotation`** | • Automated CellTypist Wrappers<br>• Custom Model Training<br>• Benchmarking |
+| **`spatialcore.r_bridge`** | • **Seurat Integration** (via rpy2)<br>• Cross-language object conversion |
 
-## Supported Platforms
+---
 
-- 10x Genomics Xenium
-- NanoString CosMx
-- 10x Genomics Visium
-- Any AnnData-compatible spatial data
+## 📚 Terminology
 
-## Terminology
-
-We use consistent terminology throughout the package:
+We strictly define our spatial units to ensure clarity:
 
 | Term | Definition |
 |------|------------|
-| **Neighborhood** | Immediate spatial context of a cell and similar groups of cells across the tissue|
-| **Niche** | Functional microenvironment | - NEEDS UPDATE
+| **Neighborhood** | The immediate spatial vicinity of a cell (e.g., k-Nearest Neighbors or fixed radius). |
+| **Niche** | A functional microenvironment defined by a specific composition of cell types (e.g., "Tumor-immune border"). |
+| **Domain** | A macroscopic, continuous tissue region with shared structural characteristics (e.g., "Cortex", "Medulla"). |
 
-## Ecosystem
+---
 
-SpatialCore integrates seamlessly with:
+## 🤝 Ecosystem Integration
 
-- [scanpy](https://scanpy.readthedocs.io/) - Single-cell analysis
-- [squidpy](https://squidpy.readthedocs.io/) - Spatial omics analysis
-- [spatialdata](https://spatialdata.scverse.org/) - Spatial data structures
-- [Seurat](https://satijalab.org/seurat/) - R integration
+SpatialCore is designed to play nice with others. It fits seamlessly into the existing Python spatial biology stack:
 
-## Package Philosophy
+*   **[Scanpy](https://scanpy.readthedocs.io/)**: The backbone for single-cell analysis.
+*   **[Squidpy](https://squidpy.readthedocs.io/)**: Advanced spatial omics analysis.
+*   **[SpatialData](https://spatialdata.scverse.org/)**: The OME-NGFF standard for spatial data storage.
+*   **[Seurat](https://satijalab.org/seurat/)**: Direct R interoperability for teams working across languages.
+
+---
+
+## ⚖️ Philosophy
 
 This package is **for computational biologists, by computational biologists**.
 
-We prioritize:
-- **Reproducibility** - Same inputs = same outputs across Python and R
-- **Scalability** - Designed for large spatial datasets (millions of cells)
-- **Simplicity** - Thin wrappers, not black boxes
-- **Documentation** - Clear docstrings with references to original methods
+*   **Reproducibility**: Same inputs = Same outputs. Period.
+*   **Scalability**: Built for the era of millions of cells (Xenium/CosMx).
+*   **Transparency**: Thin wrappers, not black boxes. We verify, we don't obfuscate.
+*   **Documentation**: Clear docstrings with academic references.
 
-We don't aim to:
-- Invent new statistical methods
-- Replace existing tools
-- Abstract away the underlying math
+**What we are NOT:**
+*   Inventing new, unproven math.
+*   Replacing Scanpy or Seurat.
 
-## Contributing
+---
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+## 📝 Citation
 
-## Citation
-
-If you use SpatialCore in your research, please cite:
+If SpatialCore aids your research, please cite:
 
 ```bibtex
 @software{spatialcore,
@@ -132,6 +139,6 @@ If you use SpatialCore in your research, please cite:
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+**Apache License 2.0**
 
-The SpatialCore name and trademarks are reserved to ensure the community can rely on the "Standardized" quality of the core library.
+The SpatialCore name and trademarks are reserved to ensure the community can rely on the "Standardized" quality of the core library. You are free to use, modify, and distribute the code, including for commercial use.
