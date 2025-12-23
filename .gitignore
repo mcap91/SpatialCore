@@ -33,7 +33,10 @@ ENV/
 *.swp
 *.swo
 *~
+
+# AI assistant instructions (local only)
 CLAUDE.md
+GEMINI.md
 
 # Jupyter
 .ipynb_checkpoints/
