@@ -77,6 +77,7 @@ Issues = "https://github.com/spatialcore/spatialcore/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["spatialcore.internal*"]
 
 [tool.setuptools.package-data]
 spatialcore = ["py.typed"]
