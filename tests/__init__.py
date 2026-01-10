@@ -1,1 +1,0 @@
-"""SpatialCore test suite."""
