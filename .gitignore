@@ -38,6 +38,10 @@ ENV/
 CLAUDE.md
 GEMINI.md
 
+# Internal reference documents (not published)
+docs_refs/
+ref_docs/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_checkpoints
@@ -96,5 +100,7 @@ site/
 # OS
 .DS_Store
 Thumbs.db
-reports/
-tests/
+nul
+
+# Claude Code local files
+.claude/
