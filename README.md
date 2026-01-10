@@ -125,6 +125,42 @@ This package is **for computational biologists, by computational biologists**.
 
 ---
 
+## 🔧 Development
+
+### Branch Strategy
+
+| Branch | Purpose | Published |
+|--------|---------|-----------|
+| `main` | Public package - spatial statistics, clustering, NMF, annotation | Yes (pip) |
+| `dev` | Internal preprocessing - ingestion, QC, normalization, cell typing | No |
+
+### For Contributors
+
+```bash
+# Clone the repository
+git clone https://github.com/mcap91/SpatialCore.git
+cd spatialcore
+
+# For public function development (main branch)
+mamba create -n spatialcore python=3.11 scanpy squidpy
+mamba activate spatialcore
+pip install -e ".[dev]"
+
+# For internal preprocessing (dev branch)
+git checkout dev
+mamba create -n spatialcore-dev python=3.11 scanpy squidpy
+mamba activate spatialcore-dev
+pip install -e ".[all,dev]"
+```
+
+### Git Workflow
+
+- Develop public functions on `main`
+- Merge `main → dev` to keep internal up-to-date
+- Never merge `dev → main` (keeps internal code out of pip package)
+
+---
+
 ## 📝 Citation
 
 If SpatialCore aids your research, please cite:
@@ -132,7 +168,7 @@ If SpatialCore aids your research, please cite:
 ```bibtex
 @software{spatialcore,
   title = {SpatialCore: Standardized spatial statistics for computational biology},
-  url = {https://github.com/spatialcore/spatialcore},
+  url = {https://github.com/mcap91/SpatialCore},
   license = {Apache-2.0}
 }
 ```
