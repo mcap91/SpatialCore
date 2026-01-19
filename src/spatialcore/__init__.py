@@ -5,7 +5,7 @@ A thin, robust wrapper around standard libraries to ensure Python and R users
 get the exact same result for the same biological question.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Track which modules are available in this installation
 _available_modules: list[str] = []

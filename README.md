@@ -83,7 +83,7 @@ import spatialcore
 
 # Check what's available in your installation
 spatialcore.print_info()
-# SpatialCore v0.1.2
+# SpatialCore v0.1.3
 # Available modules: core, annotation
 
 # Cell type annotation with CellTypist
