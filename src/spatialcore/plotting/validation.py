@@ -716,29 +716,29 @@ def plot_deg_heatmap(
     if label_column not in adata.obs.columns:
         raise ValueError(f"Label column '{label_column}' not found.")
 
-    # Run DEG analysis on a copy
-    adata_copy = adata.copy()
-    if layer and layer in adata.layers:
-        adata_copy.X = adata.layers[layer].copy()
+    # Build filter mask on original data (no copies)
+    mask_assigned = adata.obs[label_column] != "Unassigned"
 
-    # Filter out Unassigned cells for DEG
-    mask = adata_copy.obs[label_column] != "Unassigned"
-    adata_copy = adata_copy[mask].copy()
-
-    # Filter cell types with too few cells (need at least 10 for stats)
-    ct_counts = adata_copy.obs[label_column].value_counts()
+    # Get valid cell types from view (no copy)
+    ct_counts = adata.obs.loc[mask_assigned, label_column].value_counts()
     valid_cts = ct_counts[ct_counts >= 10].index.tolist()
     if len(valid_cts) < 2:
         raise ValueError("Need at least 2 cell types with >= 10 cells each for DEG analysis.")
 
-    adata_copy = adata_copy[adata_copy.obs[label_column].isin(valid_cts)].copy()
-    adata_copy.obs[label_column] = adata_copy.obs[label_column].astype(str).astype("category")
+    # Combined mask - applied once
+    mask = mask_assigned & adata.obs[label_column].isin(valid_cts)
+
+    # Single copy of filtered subset only
+    adata_deg = adata[mask].copy()
+    if layer and layer in adata_deg.layers:
+        adata_deg.X = adata_deg.layers[layer]
+    adata_deg.obs[label_column] = adata_deg.obs[label_column].astype(str).astype("category")
 
     logger.info(f"Running rank_genes_groups with method={method} on {len(valid_cts)} cell types...")
-    sc.tl.rank_genes_groups(adata_copy, label_column, method=method, n_genes=50)
+    sc.tl.rank_genes_groups(adata_deg, label_column, method=method, n_genes=50)
 
     # Get marker genes per cell type
-    results = adata_copy.uns["rank_genes_groups"]
+    results = adata_deg.uns["rank_genes_groups"]
     cell_types = sorted(results["names"].dtype.names)
 
     # Collect genes grouped by cell type (preserve order)
@@ -748,7 +748,7 @@ def plot_deg_heatmap(
     for ct in cell_types:
         genes = results["names"][ct][:n_genes]
         for gene in genes:
-            if gene not in seen and gene in adata_copy.var_names:
+            if gene not in seen and gene in adata_deg.var_names:
                 all_genes.append(gene)
                 gene_to_celltype[gene] = ct
                 seen.add(gene)
@@ -759,12 +759,12 @@ def plot_deg_heatmap(
     # Calculate mean expression per cell type
     expr_matrix = np.zeros((len(all_genes), len(cell_types)))
     for j, ct in enumerate(cell_types):
-        ct_mask = adata_copy.obs[label_column] == ct
+        ct_mask = adata_deg.obs[label_column] == ct
         if ct_mask.sum() == 0:
             continue
-        adata_ct = adata_copy[ct_mask]
+        adata_ct = adata_deg[ct_mask]
         for i, gene in enumerate(all_genes):
-            gene_idx = adata_copy.var_names.get_loc(gene)
+            gene_idx = adata_deg.var_names.get_loc(gene)
             if hasattr(adata_ct.X, "toarray"):
                 expr = adata_ct.X[:, gene_idx].toarray().flatten()
             else:
@@ -772,7 +772,7 @@ def plot_deg_heatmap(
             expr_matrix[i, j] = np.mean(expr)
 
     # Release the copy - no longer needed after expression matrix is built
-    del adata_copy
+    del adata_deg
     gc.collect()
 
     # Z-score normalize across cell types (rows)
