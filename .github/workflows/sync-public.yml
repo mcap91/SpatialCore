@@ -16,19 +16,12 @@ jobs:
           fetch-depth: 0
 
       - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.DEPLOY_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          echo "=== Debug info ==="
-          echo "Key lines: $(wc -l < ~/.ssh/id_ed25519)"
-          echo "Key bytes: $(wc -c < ~/.ssh/id_ed25519)"
-          echo "First line: $(head -1 ~/.ssh/id_ed25519)"
-          echo "Last line: $(tail -1 ~/.ssh/id_ed25519)"
-          ssh-keygen -l -f ~/.ssh/id_ed25519 || echo "Key validation failed"
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Push to Public Repo
         run: |
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
           git remote add public git@github.com:mcap91/SpatialCore.git
           git push public main --force
