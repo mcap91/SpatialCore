@@ -3,7 +3,7 @@
 **Standardized spatial statistics for computational biology.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/spatialcore.svg)](https://pypi.org/project/spatialcore/)
 [![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -12,10 +12,10 @@
 ## 🎯 The Mission
 
 ### The Problem
-Spatial biology analysis is fragmented. Implementations of basic statistics often differ between languages (R vs Python) and even between packages, making reproducibility difficult and benchmarking impossible. We spend too much time wondering if a result is biological or an artifact of the implementation.
+Tools for spatial biology analysis are fragmented. Implementations packages and complex functions often differ between languages (R vs Python) and even between packages, making reproducibility difficult and benchmarking impossible. We believe simple statistical tools solve many of the core problems of spatial biology, and we have desinged them to be intuative, easy to use, and scaleable for millions of cells. 
 
 ### The Solution
-SpatialCore serves as a **"ground truth" engineering layer**. It provides robust, standardized implementations of core spatial statistics that ensure identical results across platforms, wrapping high-performance libraries where available.
+SpatialCore serves as a package for computational biologists, by computational biologists. It provides robust, standardized implementations of core spatial statistics that ensure identical results across platforms, wrapping high-performance libraries where available.
 
 ### The Goal
 To make spatial analysis engineering boring, so you can focus on the exciting biology. **Standardized. Scalable. Reproducible.**
@@ -79,44 +79,36 @@ No manual configuration needed - it just works.
 ## 🚀 Quick Start
 
 ```python
-import scanpy as sc
-import spatialcore as sp
+import spatialcore
 
-# 1. Load your spatial data (Xenium, CosMx, Visium, etc.)
-adata = sc.read_h5ad("spatial_data.h5ad")
+# Check what's available in your installation
+spatialcore.print_info()
+# SpatialCore v0.1.2
+# Available modules: core, annotation
 
-# 2. Spatial Autocorrelation
-# Calculate Moran's I for a specific gene
-sp.spatial.morans_i(adata, gene="CD8A", spatial_key="spatial")
+# Cell type annotation with CellTypist
+from spatialcore.annotation import run_celltypist, train_custom_model
 
-# Calculate Lee's L bivariate autocorrelation (e.g., co-localization)
-sp.spatial.lees_l(adata, gene_x="CD8A", gene_y="CD4", spatial_key="spatial")
+# Run CellTypist on your AnnData object
+adata = run_celltypist(adata, model="Immune_All_Low.pkl")
 
-# 3. Define Neighborhoods & Domains
-# Compute spatial domains using Leiden clustering on spatial graph
-sp.clustering.compute_domains(adata, method="leiden", resolution=0.5)
-
-# Calculate physical distances between different tissue domains
-sp.clustering.domain_distance(adata, domain_key="domain")
-
-# 4. Spatial Factorization
-# Decompose expression into spatially coherent programs
-sp.nmf.spatial_nmf(adata, n_components=10)
+# Train a custom model on your reference data
+model = train_custom_model(adata_reference, labels_column="cell_type")
 ```
+
+📖 **Full documentation:** [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
 
 ---
 
 ## 🧩 Modules & Features
 
-| Module | Features |
-|--------|-------------|
-| **`spatialcore.spatial`** | • Global & Local Moran's I<br>• Bivariate Lee's L<br>• HH/LL/HL/LH Local Classification |
-| **`spatialcore.clustering`** | • Spatial Domain Identification<br>• Niche Analysis<br>• Neighborhood definition |
-| **`spatialcore.nmf`** | • Spatially-aware Non-negative Matrix Factorization<br>• Pattern extraction |
-| **`spatialcore.diffusion`** | • Diffusion Maps<br>• Spatial Pseudotime Analysis |
-| **`spatialcore.ontology`** | • Cell Ontology (CL) Mapping<br>• Standardization of labels |
-| **`spatialcore.annotation`** | • Automated CellTypist Wrappers<br>• Custom Model Training<br>• Benchmarking |
-| **`spatialcore.r_bridge`** | • R integration via subprocess<br>• Automatic conda/mamba environment detection |
+| Module | Status | Features |
+|--------|--------|----------|
+| **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
+| **`spatialcore.annotation`** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
+| **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
+| **`spatialcore.nmf`** | 🔜 Coming soon | Spatial non-negative matrix factorization |
+| **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
 
 ---
 
@@ -138,7 +130,6 @@ SpatialCore is designed to play nice with others. It fits seamlessly into the ex
 
 *   **[Scanpy](https://scanpy.readthedocs.io/)**: The backbone for single-cell analysis.
 *   **[Squidpy](https://squidpy.readthedocs.io/)**: Advanced spatial omics analysis.
-*   **[SpatialData](https://spatialdata.scverse.org/)**: The OME-NGFF standard for spatial data storage.
 *   **[Seurat](https://satijalab.org/seurat/)**: Direct R interoperability for teams working across languages.
 
 ---
@@ -154,43 +145,7 @@ This package is **for computational biologists, by computational biologists**.
 
 **What we are NOT:**
 *   Inventing new, unproven math.
-*   Replacing Scanpy or Seurat.
-
----
-
-## 🔧 Development
-
-### Branch Strategy
-
-| Branch | Purpose | Published |
-|--------|---------|-----------|
-| `main` | Public package - spatial statistics, clustering, NMF, annotation | Yes (pip) |
-| `dev` | Internal preprocessing - ingestion, QC, normalization, cell typing | No |
-
-### For Contributors
-
-```bash
-# Clone the repository
-git clone https://github.com/mcap91/SpatialCore.git
-cd SpatialCore
-
-# Create development environment
-mamba create -n spatialcore python=3.11
-mamba activate spatialcore
-
-# Install in editable mode with dev dependencies
-pip install -e ".[dev]"
-
-# Install R packages for spatial operations
-mamba install -c conda-forge r-base r-sf r-concaveman r-dplyr r-purrr r-jsonlite
-```
-
-### Git Workflow
-
-| Branch | Purpose | Published |
-|--------|---------|-----------|
-| `main` | Public package code | Yes (synced to public repo) |
-| `dev` | Development and internal preprocessing | No |
+*   Replacing Scanpy, Seurat, or other methods.
 
 ---
 

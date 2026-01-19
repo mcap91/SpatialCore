@@ -74,6 +74,44 @@ The publish script (`scripts/publish.ps1`) allows **selective** copying of modul
 5. Returns to dev and restores stash
 6. GitHub Action automatically syncs main → public repo
 
+### PyPI Publishing
+
+SpatialCore uses **GitHub Actions with Trusted Publishing** to publish to PyPI. No API tokens are stored as secrets.
+
+**Workflow location:** `.github/workflows/publish-pypi.yml`
+
+**Triggers:**
+- **GitHub Release** → Auto-publishes to PyPI
+- **Manual dispatch** → Choose TestPyPI or PyPI from Actions tab
+
+**To publish manually:**
+1. Go to https://github.com/mcap91/SpatialCore/actions
+2. Click "Publish to PyPI" workflow
+3. Click "Run workflow" → select `testpypi` or `pypi`
+
+**Version bumping:** Always update BOTH files before publishing:
+```python
+# pyproject.toml line 7
+version = "X.Y.Z"
+
+# src/spatialcore/__init__.py line 8
+__version__ = "X.Y.Z"
+```
+
+**Full release workflow:**
+1. Bump version in both files on `dev` branch
+2. Commit: `git commit -am "Bump version to X.Y.Z"`
+3. Run `./scripts/publish.ps1` to copy to main
+4. Create GitHub Release (tag like `vX.Y.Z`) OR manually trigger workflow
+5. Verify at https://pypi.org/project/spatialcore/
+
+**Trusted Publishing setup (one-time):**
+- PyPI: https://pypi.org/manage/account/publishing/ → Add publisher for `mcap91/SpatialCore` workflow `publish-pypi.yml` environment `pypi`
+- TestPyPI: Same at https://test.pypi.org/manage/account/publishing/ with environment `testpypi`
+- GitHub: Create environments `pypi` and `testpypi` at repo Settings → Environments
+
+**Conditional imports:** The package uses conditional imports so modules can be shipped incrementally. Missing modules return helpful errors instead of crashing. See `src/spatialcore/__init__.py`.
+
 ## Cross-Platform Development (Windows → Linux)
 
 SpatialCore is developed on **Windows** and deployed on **Linux** (production/cluster). This creates specific challenges that the codebase addresses.
