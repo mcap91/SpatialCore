@@ -8,6 +8,8 @@ on:
 
 jobs:
   sync:
+    # Only run on private repo (this syncs TO the public repo)
+    if: github.repository == 'mcap91/SpatialCore-Dev'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Private Repo

@@ -24,6 +24,8 @@ concurrency:
 
 jobs:
   build:
+    # Only run on public repo (private repo doesn't have Pages enabled)
+    if: github.repository == 'mcap91/SpatialCore'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
