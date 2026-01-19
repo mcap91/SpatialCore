@@ -1,0 +1,5 @@
+# Placeholder for ontology conversion images
+# Generate with a separate script and add:
+# - matching_tiers.png (4-tier matching flowchart)
+# - mapping_example.png (input labels → ontology IDs table)
+# - output_json.png (JSON output structure screenshot)
