@@ -18,9 +18,15 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
+          printf '%s' "${{ secrets.DEPLOY_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
+          echo "=== Debug info ==="
+          echo "Key lines: $(wc -l < ~/.ssh/id_ed25519)"
+          echo "Key bytes: $(wc -c < ~/.ssh/id_ed25519)"
+          echo "First line: $(head -1 ~/.ssh/id_ed25519)"
+          echo "Last line: $(tail -1 ~/.ssh/id_ed25519)"
+          ssh-keygen -l -f ~/.ssh/id_ed25519 || echo "Key validation failed"
 
       - name: Push to Public Repo
         run: |
