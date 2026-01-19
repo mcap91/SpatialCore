@@ -11,6 +11,7 @@ expression patterns better than bimodal GMM.
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+import gc
 
 import numpy as np
 import pandas as pd
@@ -769,6 +770,10 @@ def plot_deg_heatmap(
             else:
                 expr = np.asarray(adata_ct.X[:, gene_idx]).flatten()
             expr_matrix[i, j] = np.mean(expr)
+
+    # Release the copy - no longer needed after expression matrix is built
+    del adata_copy
+    gc.collect()
 
     # Z-score normalize across cell types (rows)
     expr_scaled = np.zeros_like(expr_matrix)

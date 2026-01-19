@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 import json
+import gc
 
 import anndata as ad
 import numpy as np
@@ -328,6 +329,10 @@ def train_and_annotate(
     )
     logger.info(f"  Balanced: {balanced.n_obs:,} cells")
 
+    # Release combined reference data - no longer needed after balancing
+    del combined
+    gc.collect()
+
     # -------------------------------------------------------------------------
     # Stage 5: Train CellTypist model
     # -------------------------------------------------------------------------
@@ -343,25 +348,29 @@ def train_and_annotate(
         feature_selection=False,  # Use panel genes as-is
         n_jobs=-1,
     )
-    model = training_result["model"]  # Extract the actual CellTypist model
+    model = training_result["model"]
+    n_training_cells = balanced.n_obs
 
-    # Save model if requested
-    if model_output:
-        model_path = Path(model_output)
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        save_model_artifacts(
-            model,
-            output_dir=model_path.parent,
-            model_name=model_path.stem,
-            training_metadata={
-                "references": [str(p) for p in references],
-                "n_cells": training_result["n_cells_trained"],
-                "n_genes": training_result["n_genes"],
-                "n_cell_types": training_result["n_cell_types"],
-                "cell_types": training_result["cell_types"],
-            },
-        )
-        logger.info(f"  Model saved to: {model_path}")
+    # Save model to user-defined path
+    model_path = Path(model_output)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    save_model_artifacts(
+        model,
+        output_dir=model_path.parent,
+        model_name=model_path.stem,
+        training_metadata={
+            "references": [str(p) for p in references],
+            "n_cells": training_result["n_cells_trained"],
+            "n_genes": training_result["n_genes"],
+            "n_cell_types": training_result["n_cell_types"],
+            "cell_types": training_result["cell_types"],
+        },
+    )
+    logger.info(f"  Model saved to: {model_path}")
+
+    # Release training data
+    del balanced
+    gc.collect()
 
     # -------------------------------------------------------------------------
     # Stage 6: Annotate spatial data
@@ -370,10 +379,10 @@ def train_and_annotate(
 
     adata = annotate_celltypist(
         adata,
-        custom_model_path=model_path if model_output else None,
+        custom_model_path=model_path,
         confidence_transform="zscore",
         store_decision_scores=True,
-        min_confidence=0.0,  # Don't filter yet, we'll do it below
+        min_confidence=0.0,
         copy=False,
     )
 
@@ -418,6 +427,11 @@ def train_and_annotate(
     if generate_plots:
         logger.info("Stage 9: Generating validation plots...")
 
+        # Release training artifacts before memory-intensive plot generation
+        del model
+        del training_result
+        gc.collect()
+
         output_dir = Path(plot_output) if plot_output else Path(".")
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -445,7 +459,7 @@ def train_and_annotate(
         "n_references": len(references),
         "references": [str(r) for r in references],
         "panel_genes": len(panel_genes),
-        "training_cells": balanced.n_obs,
+        "training_cells": n_training_cells,
         "balance_strategy": balance_strategy,
         "max_cells_per_type": max_cells_per_type,
         "confidence_threshold": confidence_threshold,
