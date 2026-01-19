@@ -1,0 +1,183 @@
+/* SpatialCore Styles - "Dark Scanpy" Aesthetic for MkDocs Material */
+
+:root {
+  /* Color Palette - matching Quarto Dark Scanpy theme */
+  --md-primary-fg-color: #4caf50;        /* Green accent */
+  --md-primary-fg-color--light: #81c784;
+  --md-primary-fg-color--dark: #388e3c;
+  --md-accent-fg-color: #4caf50;
+  --md-accent-fg-color--transparent: rgba(76, 175, 80, 0.1);
+
+  /* Dark theme overrides */
+  --md-default-bg-color: #25282b;
+  --md-default-fg-color: #c9d1d9;
+  --md-default-fg-color--light: #8b949e;
+  --md-default-fg-color--lighter: #6e7681;
+  --md-default-fg-color--lightest: #484f58;
+
+  /* Code blocks */
+  --md-code-bg-color: #151617;
+  --md-code-fg-color: #e0e0e0;
+  --md-code-hl-color: rgba(76, 175, 80, 0.2);
+
+  /* Sidebar */
+  --md-sidebar-bg-color: #25282b;
+
+  /* Typeset links */
+  --md-typeset-a-color: #4caf50;
+}
+
+/* Slate theme specific overrides */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #25282b;
+  --md-default-bg-color--light: #2d3134;
+  --md-default-bg-color--lighter: #35393d;
+  --md-default-bg-color--lightest: #3e4247;
+}
+
+/* Header styling */
+.md-header {
+  background-color: #1a1d1f;
+}
+
+/* Navigation tabs */
+.md-tabs {
+  background-color: #1a1d1f;
+}
+
+/* Sidebar styling */
+.md-sidebar {
+  background-color: var(--md-sidebar-bg-color);
+}
+
+.md-nav__link {
+  color: var(--md-default-fg-color);
+}
+
+.md-nav__link:hover {
+  color: var(--md-primary-fg-color);
+}
+
+.md-nav__link--active {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+/* Code blocks */
+.highlight pre {
+  background-color: var(--md-code-bg-color) !important;
+  border: 1px solid #3e4247;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Inline code */
+code {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffab91;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+/* Headings */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Links */
+.md-typeset a {
+  color: var(--md-primary-fg-color);
+}
+
+.md-typeset a:hover {
+  color: var(--md-primary-fg-color--light);
+}
+
+/* Tables */
+.md-typeset table:not([class]) {
+  border: 1px solid #3e4247;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: #1a1d1f;
+  color: #ffffff;
+}
+
+.md-typeset table:not([class]) tr:nth-child(odd) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Admonitions (callout boxes) */
+.md-typeset .admonition,
+.md-typeset details {
+  border-left: 4px solid var(--md-primary-fg-color);
+  background-color: rgba(76, 175, 80, 0.1);
+}
+
+.md-typeset .admonition.note {
+  border-left-color: #4caf50;
+}
+
+.md-typeset .admonition.warning {
+  border-left-color: #ff9800;
+  background-color: rgba(255, 152, 0, 0.1);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.important {
+  border-left-color: #f44336;
+  background-color: rgba(244, 67, 54, 0.1);
+}
+
+/* Footer */
+.md-footer {
+  background-color: #1a1d1f;
+}
+
+/* Search */
+.md-search__input {
+  background-color: #1a1d1f;
+}
+
+/* Content area max width */
+.md-content {
+  max-width: 1200px;
+}
+
+/* Image styling */
+.md-typeset img {
+  border-radius: 6px;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+
+/* Body text size reduction */
+.md-typeset {
+  font-size: .75rem; /* Reduced from .8rem */
+  line-height: 1.55;  /* Changed from 1.5 to meet halfway */
+}
+
+.md-typeset p, .md-typeset li {
+  margin-bottom: 0.6em; /* Reduce vertical spacing between blocks */
+}
+
+.md-typeset h1 {
+  display: flex;
+  align-items: center;
+}
+
+/* Custom faux-headers for TOC exclusion */
+.section-label {
+  font-size: 0.95rem; /* Slightly bigger than body (0.75rem) */
+  font-weight: 700;
+  color: #ffffff !important; /* Force white */
+  display: block; /* Force it to behave like a header line */
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}

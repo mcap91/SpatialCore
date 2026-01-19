@@ -46,18 +46,9 @@ nav:
   - Introduction: index.md
   - Cell Typing:
     - "Overview": celltyping/index.md
+    - "Benchmarks": celltyping/benchmarks.md
     - "Pipeline & API": celltyping/pipeline.md
     - "Validation & Rationale": celltyping/validation.md
-  - Spatial Statistics:
-    - "Moran's I": spatial/morans_i.md
-    - "Lee's L": spatial/lees_l.md
-  - Domains & Patterns:
-    - Thresholding: thresholding/multivariate_cutoff.md
-    - Neighborhood Analysis: domains/neighborhood_analysis.md
-    - Domain Detection: domains/domain_detection.md
-    - Spatial NMF: nmf/index.md
-    - Trajectory Analysis: diffusion/index.md
-  - R Integration: r_bridge/index.md
 
 # Plugins
 plugins:
@@ -94,6 +85,7 @@ markdown_extensions:
   - md_in_html                  # Markdown inside HTML
   - toc:
       permalink: true           # Anchor links on headings
+      toc_depth: 2              # Only show ## headings in TOC
 
 # Footer
 extra:
