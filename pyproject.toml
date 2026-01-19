@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spatialcore"
-version = "0.1.5"
+version = "0.1.6"
 description = "Standardized spatial statistics tools for computational biology"
 readme = "README.md"
 license = "Apache-2.0"
@@ -70,7 +70,7 @@ Issues = "https://github.com/mcap91/SpatialCore/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-spatialcore = ["py.typed"]
+spatialcore = ["py.typed", "data/**/*.json", "data/**/*.tsv"]
 
 [tool.black]
 line-length = 88
