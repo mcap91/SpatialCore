@@ -45,21 +45,10 @@ dependencies = [
     "scikit-learn>=1.0.0",
     "matplotlib>=3.5.0",
     "seaborn>=0.12.0",
+    "celltypist>=1.6.0",
 ]
 
 [project.optional-dependencies]
-celltypist = [
-    "celltypist>=1.6.0",
-]
-r = [
-    "rpy2>=3.5.0",
-]
-parallel = [
-    "numba>=0.56.0",
-]
-all = [
-    "spatialcore[celltypist,r,parallel]",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -67,13 +56,17 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "pyyaml>=6.0.0",
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocs-glightbox>=0.3.0",
+    "mkdocstrings[python]>=0.24.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/spatialcore/spatialcore"
-Documentation = "https://spatialcore.github.io/spatialcore"
-Repository = "https://github.com/spatialcore/spatialcore"
-Issues = "https://github.com/spatialcore/spatialcore/issues"
+Homepage = "https://github.com/mcap91/SpatialCore"
+Documentation = "https://mcap91.github.io/SpatialCore"
+Repository = "https://github.com/mcap91/SpatialCore"
+Issues = "https://github.com/mcap91/SpatialCore/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

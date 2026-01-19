@@ -1,0 +1,105 @@
+# MkDocs configuration for SpatialCore documentation
+# Matches the "Dark Scanpy" aesthetic from Quarto reports
+
+site_name: SpatialCore
+site_description: Engineering excellence for spatial biology analysis
+site_url: https://mcap91.github.io/SpatialCore/
+repo_url: https://github.com/mcap91/SpatialCore
+repo_name: mcap91/SpatialCore
+
+# Theme configuration - Material with dark mode
+theme:
+  name: material
+  favicon: assets/logo.png
+
+  # Color palette matching Dark Scanpy aesthetic
+  palette:
+    scheme: slate  # Dark theme
+    primary: custom
+    accent: custom
+
+  features:
+    - navigation.sections       # Section headers in sidebar
+    - navigation.top            # Back to top button
+    - search.suggest            # Search suggestions
+    - search.highlight          # Highlight search terms
+    - content.code.copy         # Copy button for code blocks
+    - toc.integrate             # Integrate page TOC into left sidebar
+
+  font:
+    text: Lato
+    code: Roboto Mono
+
+# Custom CSS to match Dark Scanpy colors
+extra_css:
+  - stylesheets/extra.css
+
+# Custom JavaScript for MathJax and Mermaid
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
+# Navigation structure - flat, direct access
+nav:
+  - Introduction: index.md
+  - Cell Typing:
+    - "Overview": celltyping/index.md
+    - "Pipeline & API": celltyping/pipeline.md
+    - "Validation & Rationale": celltyping/validation.md
+  - Spatial Statistics:
+    - "Moran's I": spatial/morans_i.md
+    - "Lee's L": spatial/lees_l.md
+  - Domains & Patterns:
+    - Thresholding: thresholding/multivariate_cutoff.md
+    - Neighborhood Analysis: domains/neighborhood_analysis.md
+    - Domain Detection: domains/domain_detection.md
+    - Spatial NMF: nmf/index.md
+    - Trajectory Analysis: diffusion/index.md
+  - R Integration: r_bridge/index.md
+
+# Plugins
+plugins:
+  - search
+  - glightbox  # Click-to-zoom for images
+  - mkdocstrings:  # Auto-generate API docs from docstrings (optional)
+      handlers:
+        python:
+          options:
+            show_source: true
+
+# Markdown extensions
+markdown_extensions:
+  - admonition                  # Callout boxes (note, warning, etc.)
+  - pymdownx.details            # Collapsible sections
+  - pymdownx.superfences:        # Fenced code blocks with syntax highlighting
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:            # Tabbed content
+      alternate_style: true
+  - pymdownx.highlight:         # Syntax highlighting
+      anchor_linenums: true
+  - pymdownx.inlinehilite       # Inline code highlighting
+  - pymdownx.snippets           # Include external files
+  - pymdownx.arithmatex:        # Math support
+      generic: true
+  - pymdownx.emoji:             # Emoji and icons
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables                      # Tables
+  - attr_list                   # Add HTML attributes
+  - md_in_html                  # Markdown inside HTML
+  - toc:
+      permalink: true           # Anchor links on headings
+
+# Footer
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mcap91/SpatialCore
+  generator: false  # Hide "Made with MkDocs"
+
+copyright: "SpatialCore: Engineering excellence for spatial biology."
