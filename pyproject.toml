@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spatialcore"
-version = "0.1.0"
+version = "0.1.1"
 description = "Standardized spatial statistics tools for computational biology"
 readme = "README.md"
-license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+license = "Apache-2.0"
+requires-python = ">=3.10"
 authors = [
     {name = "SpatialCore Contributors"}
 ]
@@ -28,7 +28,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -76,15 +75,15 @@ spatialcore = ["py.typed"]
 
 [tool.black]
 line-length = 88
-target-version = ["py39", "py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 
