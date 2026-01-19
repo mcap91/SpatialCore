@@ -1,39 +1,31 @@
 # Cell Typing
 
-**A CellTypist wrapper for spatial transcriptomics with calibrated confidence and ontology standardization.**
+**A pipeline and CellTypist wrapper for spatial transcriptomics with custom reference imports, calibrated confidence, and ontology standardization.**
 
-SpatialCore's annotation module solves the practical engineering challenges of applying [CellTypist](https://github.com/Teichlab/celltypist) to spatial data. It is not a new classification algorithm—it's a robust wrapper that ensures 100% gene utilization, calibrated confidence scores, and Cell Ontology standardization.
+SpatialCore's annotation module solves the practical engineering challenges of applying [CellTypist](https://github.com/Teichlab/celltypist) to spatial data. It is not a new classification algorithm—it is a robust wrapper that enables custom reference imports, ensures 100% gene utilization, provides calibrated confidence scores, and standardizes output to the Cell Ontology.
 
 ---
 
-## The Problem
+## 🎯 The Problem
 
-### Gene Panel Mismatch
+**Gene Panel Mismatch**{: .section-label }
 
-Spatial platforms (Xenium, CosMx, Visium) measure 300–500 genes. Pre-trained CellTypist models were trained on 15,000+ genes.
+Spatial platforms with segmented single cells (Xenium, CosMx) measure 400–5,000 genes. Pre-trained CellTypist models were trained on 15,000+ genes.
 
 ```
-PRE-TRAINED MODEL (e.g., Immune_All_High.pkl)
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Training genes: ~15,000                                                 │
-│ █████████████████████████████████████████████████████████████████████   │
-└─────────────────────────────────────────────────────────────────────────┘
-
-XENIUM PANEL
-┌────┐
-│ 400│ genes
-└────┘
-
+Xenium data set with 300-400 features
 OVERLAP: ~30-50 genes (5-9%)
 └── Model ignores 91-95% of its learned features
 └── Result: Low confidence, noisy predictions
 ```
 
-**SpatialCore solution:** Train a custom model on the *exact genes* in your spatial panel using public scRNA-seq references. Overlap becomes 100%.
+**SpatialCore Solution:** Train a custom model on the *exact genes* in your spatial panel using public scRNA-seq references. Overlap becomes 100%. This approach works for any segmented single-cell spatial data and any feature set size. We have tested it on panels as small as 400 genes, as well as on 18,000-gene whole transcriptome spatial datasets.
 
-### Confidence Miscalibration
+**Confidence Miscalibration**{: .section-label }
 
-CellTypist outputs sigmoid-transformed decision scores as "probabilities." These are not calibrated when applied to different technologies.
+CellTypist outputs sigmoid-transformed decision scores as "probabilities." These are not calibrated when applied to different technologies. Since scRNA-seq and spatial transcriptomic data differ widely in their distributions, CellTypist decision scores often become negative.
+
+While cell type assignment still occurs based on the ranked order of these scores (where the least negative value wins), the sigmoid-transformed probability collapses to near 0. This is often misinterpreted as low confidence, even when the ranked prediction is biologically correct.
 
 ```
 THE PROBLEM
@@ -54,96 +46,13 @@ sigmoid(-4.0) = 0.018   ← "1.8% confident" but prediction may be CORRECT
 The raw probabilities are crushed to near-zero even for valid calls.
 ```
 
-**SpatialCore solution:** Z-score normalize decision scores *within* the spatial dataset before sigmoid transformation. Confidence now means "above or below average for this dataset."
+**SpatialCore Solution:** We Z-score normalize decision scores *within* the spatial dataset before sigmoid transformation. Confidence becomes relative: "above or below average for this dataset," making it interpretable for spatial predictions.
 
 ---
 
-## Comparison: Standard vs SpatialCore
+## 🚀 Key Features
 
-| Aspect | Standard CellTypist | SpatialCore Pipeline |
-|--------|---------------------|----------------------|
-| Model type | Pre-trained (Immune_All, etc.) | Custom (panel-specific) |
-| Gene overlap | ~5–9% on 400-gene panels | **100%** |
-| Confidence metric | Raw sigmoid probability | **Z-score transformed** |
-| Threshold meaning | "Model >50% likely" | "Above average for this dataset" |
-| Ontology mapping | Model-dependent labels | **Cell Ontology (CL) IDs** |
-| Multi-reference handling | N/A | **Source-aware balancing** |
-
----
-
-## Pipeline Architecture
-
-![SpatialCore Cell Typing Pipeline](images/spatialcore_celltypist_pipeline.png)
-
-```
-PHASE 1: ACQUISITION (run once)
-──────────────────────────────────────────────────────────────────────────
-
-  Reference Sources              Destination
-  ┌─────────────────┐           ┌─────────────────┐
-  │ CellxGene Census│           │ Local filesystem│
-  │ Synapse         │  ──────▶  │ Google Cloud    │
-  │ Local h5ad      │           │ Amazon S3       │
-  └─────────────────┘           └─────────────────┘
-
-  acquire_reference()
-
-PHASE 2: TRAINING & ANNOTATION
-──────────────────────────────────────────────────────────────────────────
-
-  Spatial Data           References (1..N)
-  ┌──────────┐          ┌──────────┐ ┌──────────┐
-  │ Xenium   │          │ Atlas 1  │ │ Atlas 2  │
-  │ 400 genes│          │ 100K cell│ │ 50K cells│
-  └────┬─────┘          └────┬─────┘ └────┬─────┘
-       │                     │            │
-       ▼                     └──────┬─────┘
-  get_panel_genes()                 │
-       │                            ▼
-       │               combine_references()
-       │               ├─ Ensembl → HUGO conversion
-       │               ├─ log1p(10k) normalization
-       │               └─ Gene intersection
-       │                            │
-       │                            ▼
-       │               add_ontology_ids()
-       │               └─ 4-tier CL matching
-       │                            │
-       │                            ▼
-       │               subsample_balanced()
-       │               ├─ Source-aware Cap & Fill
-       │               └─ Semantic grouping by CL ID
-       │                            │
-       │                            ▼
-       │               train_celltypist_model()
-       │               └─ SGD mini-batch training
-       │                            │
-       └──────────────────────────▶ │
-                                    ▼
-                       annotate_celltypist()
-                       ├─ Apply custom model
-                       ├─ Z-score confidence
-                       └─ Threshold → "Unassigned"
-                                    │
-                                    ▼
-                       add_ontology_ids()
-                       └─ Map predictions to CL IDs
-
-PHASE 3: VALIDATION
-──────────────────────────────────────────────────────────────────────────
-
-  generate_annotation_plots()
-  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-  │ DEG Heatmap   │ │ 2D Validation │ │ Confidence    │ │ Ontology Map  │
-  │ Top N markers │ │ GMM-3 thresh  │ │ Spatial+Jitter│ │ Tier colors   │
-  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘
-```
-
----
-
-## Key Features
-
-### 1. Source-Aware Balancing
+**Source-Aware Balancing**{: .section-label }
 
 When combining multiple references, larger atlases can dominate training. SpatialCore implements a "Cap & Fill" algorithm that draws proportionally from each source.
 
@@ -165,47 +74,13 @@ Example: Training on Macrophages from two sources
   └── Model learns consensus signature across batches
 ```
 
-For FACS-enriched references (pure sorted populations), use `source_balance="equal"` to prevent over-representation.
-
-### 2. Semantic Grouping by Ontology
-
-Different references use different names for the same cell type. SpatialCore maps all labels to Cell Ontology (CL) IDs before balancing.
-
-```
-Reference A: "CD4-positive, alpha-beta T cell"  ──┐
-                                                  ├──▶ CL:0000624 (grouped)
-Reference B: "CD4+ T cells"  ─────────────────────┘
-```
-
-![4-Tier Ontology Matching](images/matching_tiers.png)
-
-The 4-tier matching system:
-
-| Tier | Strategy | Score | Example |
-|------|----------|-------|---------|
-| 0 | Pattern Canonicalization | 0.95 | "Treg" → "regulatory T cell" |
-| 1 | Exact Match | 0.90–1.0 | Direct lookup in ontology index |
-| 2 | Token-Based | 0.60–0.85 | CD markers, gene names |
-| 3 | Word Overlap | 0.50–0.70 | Jaccard similarity fallback |
-
-### 3. Z-Score Confidence Calibration
-
-Raw CellTypist probabilities are miscalibrated for spatial data. SpatialCore transforms decision scores into dataset-relative confidence:
-
-```python
-# Standard CellTypist: raw sigmoid
-confidence = sigmoid(decision_score)  # Often < 0.1 for spatial data
-
-# SpatialCore: z-score then sigmoid
-z_score = (decision_score - mean) / std
-confidence = sigmoid(z_score)  # Interpretable 0-1 scale
-```
+For FACS-enriched references (pure sorted populations), users can provide empirically defined cell type proportions (in JSON or CSV) to prevent over-representation and match target tissue distributions.
 
 ---
 
-## Quick Start
+## ⚡ Quick Start
 
-### One-Shot Pipeline
+**One-Shot Pipeline**{: .section-label }
 
 ```python
 from spatialcore.annotation import train_and_annotate
@@ -232,7 +107,7 @@ print(adata.obs["cell_type"].value_counts())
 print(f"Mean confidence: {adata.obs['cell_type_confidence'].mean():.3f}")
 ```
 
-### Output Columns (CellxGene Standard)
+**Output Columns (CellxGene Standard)**{: .section-label }
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -243,7 +118,7 @@ print(f"Mean confidence: {adata.obs['cell_type_confidence'].mean():.3f}")
 
 ---
 
-## Packaged Data Files
+## 📦 Packaged Data Files
 
 SpatialCore includes curated reference data:
 
@@ -264,24 +139,24 @@ print(markers["macrophage"])
 
 ---
 
-## Validation Outputs
+## 📊 Validation Outputs
 
-The pipeline generates four standard QC plots:
+The pipeline generates standard QC plots to verify that predictions are biologically meaningful. We validate ontology-mapped cell type names against their top 10 DEGs and check how confidence correlates with canonical marker expression.
 
 | Plot | Purpose |
 |------|---------|
 | **DEG Heatmap** | Top marker genes per predicted cell type, z-score normalized |
-| **2D Validation** | GMM-3 thresholding validates marker expression vs confidence |
+| **2D Validation** | GMM-3 thresholding validates marker expression vs. confidence |
 | **Confidence Map** | Spatial distribution of confidence scores with threshold line |
 | **Ontology Mapping** | Shows how labels were mapped to CL IDs with tier colors |
 
-![DEG Heatmap](images/lung_celltyping_deg_heatmap.png)
-
-![2D Validation](images/lung_celltyping_2d_validation.png)
+| DEG Heatmap | 2D Validation |
+|:---:|:---:|
+| ![DEG Heatmap](images/lung_celltyping_deg_heatmap.png){ width=400 } | ![2D Validation](images/lung_celltyping_2d_validation.png){ width=400 } |
 
 ---
 
-## Next Steps
+## 🔗 Next Steps
 
-- **[Pipeline & API Reference](pipeline.md)** — Detailed function signatures, parameters, and low-level control
-- **[Validation & Design Rationale](validation.md)** — Evidence for design decisions, benchmark data, algorithm details
+- **[Pipeline & API Reference](pipeline.md)** — Detailed function signatures, parameters, and low-level control.
+- **[Validation & Design Rationale](validation.md)** — Evidence for design decisions, benchmark data, and algorithm details.

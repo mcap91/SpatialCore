@@ -8,11 +8,11 @@ This page documents *why* the pipeline works the way it does, with actual data f
 
 ## Why Custom Models?
 
-SpatialCore trains custom CellTypist models instead of using pre-trained ones. This is not about improving CellTypist—it's about solving a practical engineering problem.
+SpatialCore trains custom CellTypist models instead of using pre-trained ones. This is not about improving CellTypist, it's about solving a practical engineering problem.
 
-### The Gene Overlap Problem
+**The Gene Overlap Problem:**
 
-Pre-trained CellTypist models were trained on full scRNA-seq transcriptomes (~15,000 genes). Spatial panels contain 300–500 genes.
+Pre-trained CellTypist models were trained on full scRNA-seq transcriptomes (~15,000 genes). Spatial panels can contain as low as 400 genes.
 
 **Measured gene overlap (Xenium Human Multi-Tissue Panel, 377 genes):**
 
@@ -31,7 +31,7 @@ Pre-trained CellTypist models were trained on full scRNA-seq transcriptomes (~15
 
 The pre-trained models ignore 91–93% of their learned features when applied to spatial data. Every coefficient they learned for genes outside the panel becomes meaningless.
 
-### What This Means for Predictions
+**What This Means for Predictions:**
 
 When 92% of features are missing, the model is essentially guessing. The decision scores shift systematically negative, causing:
 
@@ -45,7 +45,7 @@ Custom models trained on the exact panel genes produce decision scores centered 
 
 ## Reference Data Selection
 
-### Query vs Collections API
+**Query vs Collections API:**
 
 CellxGene Census offers two access methods. We recommend **Query** for cell typing training:
 
@@ -57,7 +57,7 @@ CellxGene Census offers two access methods. We recommend **Query** for cell typi
 | **Source diversity** | Single study per download | Cross-study aggregation |
 | **Recommended for** | Reproducibility of specific studies | Training custom models |
 
-**Query API validation (liver tissue, 2024-01-18):**
+**Query API validation (lung tissue, 2024-01-18):**
 
 ```
 Total cells: 847,291
@@ -66,21 +66,38 @@ Cell types with CL IDs: 89%
 Gene format: 100% Ensembl
 ```
 
-### Label Quality Validation
+**Cell Type Diversity vs Sample Size:**
+
+We tested how cell type diversity scales with `max_cells` to establish sampling recommendations:
+
+| max_cells | actual_cells | cell_types | singletons | <10 cells (filtered) | ≥10 cells (kept) |
+|----------:|-------------:|-----------:|-----------:|---------------------:|------------------:|
+| 20,000 | 20,000 | 898 | 16 | 783 | 115 |
+| 40,000 | 40,000 | 898 | 13 | 765 | 133 |
+| 80,000 | 80,000 | 898 | 15 | 745 | 153 |
+| 100,000 | 100,000 | 898 | 14 | 740 | 158 |
+
+**Key findings:**
+
+- **Singletons are stable** (~14-16 regardless of sample size) — these are annotation artifacts, not sampling effects
+- **82-87% of cell types are filtered** by `min_cells_per_type=10` — most CellxGene labels are too rare for classifier training
+- **Doubling cells → +15-18% usable cell types** — diminishing returns above 100K cells
+- **Recommendation:** `max_cells=100000` balances diversity (158 types) with memory (~2GB per reference)
+
+**Label Quality Validation:**
 
 We analyzed label quality in reference data to establish filtering thresholds.
 
 **Singleton analysis (types with < 10 cells):**
 
-```python
-# From tests/test_cellxgene_functions.py
-# Query: tissue="liver", 100K cells sampled
+```
+Query: tissue="lung", 100K cells sampled
 
 Cell types with < 10 cells: 47
 Examples:
   - "CD4-positive, alpha-beta cytotoxic T cell": 3 cells
   - "conventional dendritic cell type 3": 2 cells
-  - "hepatic stellate cell (activated)": 1 cell
+  - "pulmonary ionocyte": 1 cell
 
 These singletons cause training instability and should be filtered.
 ```
@@ -100,31 +117,35 @@ combine_references(
 
 ## Source-Aware Balancing
 
-### The Problem
+**The Problem:**
 
 When combining multiple reference datasets, larger atlases dominate training.
 
-**Example scenario:**
+**Example scenario (lung tissue):**
 
 ```
-Reference A (HLCA): 500,000 cells
-  - Macrophages: 50,000
-  - T cells: 100,000
-  - B cells: 30,000
+Tissue Atlas: 27,000 cells (natural proportions)
+  - Macrophage: 8,100 (30%)
+  - Alveolar macrophage: 4,050 (15%)
+  - Type II pneumocyte: 5,400 (20%)
+  - Type I pneumocyte: 2,700 (10%)
+  - Fibroblast: 4,050 (15%)
+  - Epithelial cell: 2,700 (10%)
 
-Reference B (In-house): 10,000 cells
-  - Macrophages: 2,000
-  - T cells: 3,000
-  - B cells: 1,000
+FACS Lymphoid: 8,300 cells (sorted populations)
+  - CD4+ T cell: 3,000 (36%)
+  - CD8+ T cell: 2,000 (24%)
+  - NK cell: 1,500 (18%)
+  - B cell: 1,000 (12%)
+  - Plasma cell: 500 (6%)
+  - Macrophage: 300 (4%)
 
-NAIVE CONCATENATION:
-  Macrophages: 52,000 (96% from HLCA)
-  T cells: 103,000 (97% from HLCA)
-
-Problem: Model learns HLCA batch effects, ignores in-house data
+NAIVE CONCATENATION for Macrophage:
+  8,400 total (96% from Tissue Atlas, 4% from FACS)
+  Problem: Model learns Tissue Atlas batch effects, ignores FACS diversity
 ```
 
-### Cap & Fill Algorithm
+**Cap & Fill Algorithm:**
 
 SpatialCore implements source-aware "Cap & Fill" balancing:
 
@@ -137,35 +158,41 @@ FOR each cell_type:
   5. Sample without replacement
 ```
 
-**Validation test (from `tests/test_subsample_balanced.py`):**
+**Validation test:**
 
 ```python
-# Test fixture: 2 sources, 3 cell types
-# Source A: T cell=5000, B cell=3000, Macrophage=2000
-# Source B: T cell=1000, B cell=500, Macrophage=300
+# Test fixture: Macrophage appears in BOTH sources
+# Tissue Atlas: 8,100 macrophages
+# FACS Lymphoid: 300 macrophages
 
 # PROPORTIONAL balance (target=2000 per type)
 result = subsample_balanced(
     adata,
     label_column="cell_type",
-    source_column="source",
+    source_column="reference_source",
     source_balance="proportional",
     max_cells_per_type=2000,
 )
 
-# Validation:
-T cell allocation:
-  Source A: 2000 × (5000/6000) = 1,667 cells
-  Source B: 2000 × (1000/6000) = 333 cells
+# Validation (Macrophage allocation):
+  Tissue Atlas: 2000 × (8100/8400) = 1,929 cells (96.4%)
+  FACS Lymphoid: 2000 × (300/8400) = 71 cells (3.6%)
   Total: 2,000 ✓
 
-B cell allocation:
-  Source A: 2000 × (3000/3500) = 1,714 cells
-  Source B: 2000 × (500/3500) = 286 cells
-  Total: 2,000 ✓
+# EQUAL balance for FACS data:
+result = subsample_balanced(
+    adata,
+    source_balance="equal",
+    max_cells_per_type=2000,
+)
+
+# Validation (Macrophage allocation with equal balance):
+  Tissue Atlas: 1,000 cells (50%)
+  FACS Lymphoid: 300 cells (all available, fills from other source)
+  Total: 1,300 ✓  (FACS capped at available, backfilled)
 ```
 
-### Semantic Grouping Validation
+**Semantic Grouping Validation:**
 
 Different references use different names for the same cell type. Grouping by CL ID ensures proper balancing.
 
@@ -195,27 +222,29 @@ Different references use different names for the same cell type. Grouping by CL 
 
 ## Enriched Reference Handling
 
-### The Problem
+**The Problem:**
 
 FACS-sorted or enriched references contain artificially high proportions of specific cell types.
 
-**Real-world example:**
+**Example:**
 
 ```
-Tissue atlas (500K cells):
-  - NK cells: 250 (0.05%)
-  - Plasma cells: 1,500 (0.3%)
-  - Macrophages: 50,000 (10%)
+Tissue atlas (20K cells):
+  - T cells: 3,000 (15%)
+  - Macrophages: 8,000 (40%)
+  - Epithelial: 9,000 (45%)
+  - NK cells: 0 (absent from tissue sample)
 
 FACS-sorted NK reference (5K cells):
-  - NK cells: 5,000 (100%)  ← artificially enriched
+  - NK cells: 5,000 (100%)  ← pure enriched population
 
 Combined (naive):
-  - NK cells: 5,250 (1% of 505K)
-  - This is 20× the biological frequency!
+  - NK cells: 5,000 / 25,000 = 20% of training
+  - Biological reality: let's say NK should be ~0.25% in lung tissue
+  - This is 80× the biological frequency!
 ```
 
-### target_proportions Solution
+**target_proportions Solution:**
 
 The `target_proportions` parameter caps enriched cell types at expected biological frequencies:
 
@@ -230,33 +259,35 @@ balanced = subsample_balanced(
     },
 )
 ```
+Users can provide imperically determind target_proportions in .csv or .json formats to spatialcore for target proportion matching.
 
-**Validation (from `tests/validate_subsampling.py`):**
+**Validation:**
 
 ```
-Input: 25,000 cells combined
+Input: 25,000 cells combined (20K tissue + 5K FACS pure NK)
   - NK cells: 5,000 (from FACS reference only)
-  - Expected: 0.25% = 62 cells
+  - Target proportion: 0.25% = 0.0025
+  - Expected: 0.0025 × 25,000 = 62-63 cells
 
 Output with target_proportions:
-  - NK cells: 62 cells ✓
-  - Other types: capped at max_cells_per_type as usual
+  - NK cells: 62 cells ✓ (reduced from 5,000!)
+  - T cells, Macrophages, Epithelial: capped at max_cells_per_type as usual
 ```
 
 **Where to get biological proportions:**
 
 | Source | Use Case | Example |
 |--------|----------|---------|
-| Literature | Known tissue composition | "NK cells are ~1-5% of liver lymphocytes" |
+| Literature | Known tissue composition | "NK cells are x% of lung tissue" |
 | Flow cytometry | Gold standard for immune | FACS panel quantification |
 | Pilot scRNA-seq | Same tissue, unenriched | Large atlas cell type frequencies |
-| Expert knowledge | Domain expertise | Pathologist/immunologist input |
+| Expert knowledge | Domain expertise | Pulmonologist/pathologist input |
 
 ---
 
 ## Confidence Calibration
 
-### Why Z-Score Transformation?
+**Why Z-Score Transformation?**
 
 CellTypist outputs logistic regression decision scores, transformed to probabilities via sigmoid:
 
@@ -281,7 +312,7 @@ Example:
   But this cell is correctly classified!
 ```
 
-### Z-Score Solution
+**Z-Score Solution:**
 
 SpatialCore z-normalizes decision scores within the spatial dataset:
 
@@ -307,7 +338,7 @@ confidence = sigmoid(z_score)
 
 ## Ontology Mapping Validation
 
-### 4-Tier Matching Performance
+**4-Tier Matching Performance:**
 
 We validated the ontology matching system on 500+ unique cell type labels from CellxGene Census:
 
@@ -321,7 +352,7 @@ We validated the ontology matching system on 500+ unique cell type labels from C
 
 **Total coverage: 98.6%**
 
-### Pattern Matching Examples
+**Pattern Matching Examples:**
 
 The pattern canonicalization (Tier 0) handles common variations:
 
@@ -334,7 +365,7 @@ The pattern canonicalization (Tier 0) handles common variations:
 | "DCs" | "dendritic cell" | CL:0000451 |
 | "Club (nasal)" | "club cell" | CL:0000158 |
 
-### Unmapped Label Analysis
+**Unmapped Label Analysis:**
 
 The 1.4% unmapped labels typically fall into these categories:
 
@@ -347,61 +378,7 @@ The 1.4% unmapped labels typically fall into these categories:
 
 ---
 
-## Validation Test Summary
-
-### Test Coverage
-
-```
-tests/
-├── test_cellxgene_functions.py    # CellxGene API integration
-├── test_subsample_balanced.py     # Balancing algorithm unit tests
-├── test_normalization.py          # Normalization detection (42 tests)
-└── validate_subsampling.py        # End-to-end validation with plots
-```
-
-### Key Test Scenarios
-
-**From `test_subsample_balanced.py`:**
-
-| Test | Description | Status |
-|------|-------------|--------|
-| `test_proportional_balance` | Source A:B = 5:1 → allocation 5:1 | PASS |
-| `test_equal_balance` | Source A:B = 5:1 → allocation 1:1 | PASS |
-| `test_cap_at_available` | Source has fewer cells than target | PASS |
-| `test_fill_shortfall` | Redistribute unfilled quota | PASS |
-| `test_min_cells_enforced` | Below-min sources still contribute | PASS |
-| `test_group_by_ontology` | Different labels, same CL ID | PASS |
-| `test_target_proportions` | Enriched cell types capped | PASS |
-
-**From `test_normalization.py`:**
-
-| Test | Description | Status |
-|------|-------------|--------|
-| `test_detect_raw_counts` | Integers in X | PASS |
-| `test_detect_log1p_10k` | Verified via expm1 | PASS |
-| `test_detect_log1p_cpm` | Different target sum | PASS |
-| `test_layer_priority` | counts > raw_counts > raw > raw.X | PASS |
-| `test_float_precision` | 1.0000000000002 is integer | PASS |
-| `test_unsafe_force` | Allows invalid states with warning | PASS |
-
----
-
-## Benchmark Data
-
-### Xenium Liver (162K cells)
-
-Comparison of pre-trained vs custom model performance:
-
-| Metric | Pre-trained (Immune_All) | SpatialCore Custom |
-|--------|--------------------------|-------------------|
-| Gene overlap | 31 (8.2%) | 377 (100%) |
-| Unassigned cells | 54.5% | 44.2% |
-| Mean confidence | 0.477 | 0.558 |
-| Mean confidence (assigned) | 0.80 | 0.99 |
-| Cell types detected | 67 | 64 |
-| Ontology mapped | 95.5% | 100% |
-
-### Key Quality Metrics
+## Quality Metrics
 
 We recommend evaluating annotation quality using:
 
@@ -495,22 +472,6 @@ from spatialcore.core.utils import load_ensembl_to_hugo_mapping
 mapping = load_ensembl_to_hugo_mapping()
 print(mapping["ENSG00000121410"])
 # "A1BG"
-```
-
----
-
-## Running Validation Tests
-
-```bash
-# Run all annotation tests
-pytest tests/test_subsample_balanced.py -v
-pytest tests/test_normalization.py -v
-
-# Run end-to-end validation with plots
-python tests/validate_subsampling.py
-
-# Run CellxGene integration tests (requires network)
-pytest tests/test_cellxgene_functions.py -v
 ```
 
 ---
