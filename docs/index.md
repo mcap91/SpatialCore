@@ -103,15 +103,14 @@ sp.nmf.spatial_nmf(adata, n_components=10)
 
 ## 🧩 Modules & Features
 
-| Module | Features |
-|--------|-------------|
-| **[`spatialcore.spatial`](spatial/index.md)** | • Global & Local Moran's I<br>• Bivariate Lee's L<br>• HH/LL/HL/LH Local Classification |
-| **[`spatialcore.clustering`](domains/index.md)** | • Spatial Domain Identification<br>• Niche Analysis<br>• Neighborhood definition |
-| **[`spatialcore.nmf`](nmf/index.md)** | • Spatially-aware Non-negative Matrix Factorization<br>• Pattern extraction |
-| **[`spatialcore.diffusion`](diffusion/index.md)** | • Diffusion Maps<br>• Spatial Pseudotime Analysis |
-| **[`spatialcore.ontology`](celltyping/ontology_conversion.md)** | • Cell Ontology (CL) Mapping<br>• Standardization of labels |
-| **[`spatialcore.annotation`](celltyping/index.md)** | • Automated CellTypist Wrappers<br>• Custom Model Training<br>• Benchmarking |
-| **[`spatialcore.r_bridge`](r_bridge/index.md)** | • **Seurat Integration** (via rpy2)<br>• Cross-language object conversion |
+| Module | Status | Features |
+|--------|--------|----------|
+| **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
+| **[`spatialcore.annotation`](celltyping/index.md)** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
+| **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
+| **`spatialcore.nmf`** | 🔜 Coming soon | Spatial non-negative matrix factorization |
+| **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
+| **`spatialcore.r_bridge`** | 🔜 Coming soon | Seurat integration via subprocess |
 
 ---
 
