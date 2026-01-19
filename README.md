@@ -87,13 +87,13 @@ spatialcore.print_info()
 # Available modules: core, annotation
 
 # Cell type annotation with CellTypist
-from spatialcore.annotation import run_celltypist, train_custom_model
+from spatialcore.annotation import annotate_celltypist, train_celltypist_model
 
-# Run CellTypist on your AnnData object
-adata = run_celltypist(adata, model="Immune_All_Low.pkl")
+# Annotate cells using CellTypist (auto-selects models based on tissue)
+adata = annotate_celltypist(adata, tissue="colon")
 
 # Train a custom model on your reference data
-model = train_custom_model(adata_reference, labels_column="cell_type")
+model = train_celltypist_model(adata_reference, label_column="cell_type")
 ```
 
 📖 **Full documentation:** [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)

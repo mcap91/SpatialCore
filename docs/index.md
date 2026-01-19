@@ -75,29 +75,27 @@ pip install spatialcore[all]
 
 ```python
 import scanpy as sc
-import spatialcore as sp
+import spatialcore
 
-# 1. Load your spatial data (Xenium, CosMx, Visium, etc.)
+# Check what's available in your installation
+spatialcore.print_info()
+# SpatialCore v0.1.3
+# Available modules: core, annotation
+
+# Load your spatial data
 adata = sc.read_h5ad("spatial_data.h5ad")
 
-# 2. Spatial Autocorrelation
-# Calculate Moran's I for a specific gene
-sp.spatial.morans_i(adata, gene="CD8A", spatial_key="spatial")
+# Cell type annotation with CellTypist
+from spatialcore.annotation import annotate_celltypist, train_celltypist_model
 
-# Calculate Lee's L bivariate autocorrelation (e.g., co-localization)
-sp.spatial.lees_l(adata, gene_x="CD8A", gene_y="CD4", spatial_key="spatial")
+# Annotate cells using CellTypist (auto-selects models based on tissue)
+adata = annotate_celltypist(adata, tissue="colon")
 
-# 3. Define Neighborhoods & Domains
-# Compute spatial domains using Leiden clustering on spatial graph
-sp.clustering.compute_domains(adata, method="leiden", resolution=0.5)
-
-# Calculate physical distances between different tissue domains
-sp.clustering.domain_distance(adata, domain_key="domain")
-
-# 4. Spatial Factorization
-# Decompose expression into spatially coherent programs
-sp.nmf.spatial_nmf(adata, n_components=10)
+# Train a custom model on your reference data
+model = train_celltypist_model(adata_reference, label_column="cell_type")
 ```
+
+See the [Cell Typing documentation](celltyping/index.md) for detailed tutorials and API reference.
 
 ---
 
