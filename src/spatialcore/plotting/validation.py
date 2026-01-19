@@ -728,11 +728,14 @@ def plot_deg_heatmap(
     # Combined mask - applied once
     mask = mask_assigned & adata.obs[label_column].isin(valid_cts)
 
-    # Single copy of filtered subset only
-    adata_deg = adata[mask].copy()
-    if layer and layer in adata_deg.layers:
-        adata_deg.X = adata_deg.layers[layer]
-    adata_deg.obs[label_column] = adata_deg.obs[label_column].astype(str).astype("category")
+    # Manual AnnData construction to avoid anndata 0.12.x memory bug in adata[mask].copy()
+    indices = np.where(mask)[0]
+    X_sub = adata.X[indices]
+    if layer and layer in adata.layers:
+        X_sub = adata.layers[layer][indices]
+    obs_sub = adata.obs.iloc[indices].copy()
+    obs_sub[label_column] = obs_sub[label_column].astype(str).astype("category")
+    adata_deg = ad.AnnData(X=X_sub, obs=obs_sub, var=adata.var.copy())
 
     logger.info(f"Running rank_genes_groups with method={method} on {len(valid_cts)} cell types...")
     sc.tl.rank_genes_groups(adata_deg, label_column, method=method, n_genes=50)
