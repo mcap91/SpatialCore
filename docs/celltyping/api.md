@@ -147,6 +147,7 @@ def train_and_annotate(
     balance_strategy: Literal["proportional", "equal"] = "proportional",
     max_cells_per_type: int = 10000,
     max_cells_per_ref: int = 100000,
+    target_proportions: Optional[Union[Dict[str, float], str, Path]] = None,
     confidence_threshold: float = 0.8,
     model_output: Optional[Union[str, Path]] = None,
     plot_output: Optional[Union[str, Path]] = None,
@@ -167,6 +168,7 @@ def train_and_annotate(
 | `balance_strategy` | `str` | `"proportional"` | Source balancing strategy |
 | `max_cells_per_type` | `int` | `10000` | Max cells per type after balancing |
 | `max_cells_per_ref` | `int` | `100000` | Max cells to load per reference |
+| `target_proportions` | `Dict` / `Path` | `None` | Expected proportions for FACS/enriched cell types |
 | `confidence_threshold` | `float` | `0.8` | Below this → "Unassigned" |
 | `model_output` | `Path` | `None` | Save model to this path |
 | `plot_output` | `Path` | `None` | Save plots to this directory |
@@ -214,6 +216,7 @@ class TrainingConfig:
     balance_strategy: Literal["proportional", "equal"] = "proportional"
     max_cells_per_type: int = 10000
     max_cells_per_ref: int = 100000
+    target_proportions: Optional[Union[Dict[str, float], str, Path]] = None
     confidence_threshold: float = 0.8
     add_ontology: bool = True
     generate_plots: bool = True
@@ -675,6 +678,27 @@ xenium = filter_low_confidence(
     unassigned_label="Unassigned",
 )
 ```
+
+---
+
+#### Custom Label Workflows
+
+For datasets with complex author-defined labels (e.g., "F-0: PRG4+ CLIC5+ lining"), preprocess externally then use the low-level API:
+
+```python
+# 1. Apply your label mapping before calling SpatialCore
+mapping = {"F-0: PRG4+ CLIC5+ lining": "Lining fibroblast", ...}
+combined.obs["cell_type_clean"] = combined.obs["original_label"].map(mapping).fillna(combined.obs["original_label"])
+
+# 2. Balance and train on your clean labels (skip CL ID grouping)
+balanced = subsample_balanced(combined, label_column="cell_type_clean", group_by_column=None)
+result = train_celltypist_model(balanced, label_column="cell_type_clean")
+
+# 3. Optionally add ontology IDs with a custom index
+adata, _, _ = add_ontology_ids(adata, index_path="my_merged_index.json")
+```
+
+Use this pattern when author labels are cluster IDs with markers or domain-specific terms not in Cell Ontology. Use `train_and_annotate()` for standard workflows with CellxGene-compliant output.
 
 ---
 

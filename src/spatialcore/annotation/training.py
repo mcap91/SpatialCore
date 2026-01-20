@@ -399,8 +399,9 @@ def combine_references(
         logger.info(f"    ... and {len(ct_counts) - 10} more types")
 
     # Store validation results in uns if validation was performed
+    # Convert to JSON string for h5ad serialization (lists of dicts not supported)
     if validate_labels and validation_results:
-        combined.uns["validation_results"] = validation_results
+        combined.uns["validation_results"] = json.dumps(validation_results)
 
     logger.info(
         f"\nCombined reference ready. Call subsample_balanced() for "
