@@ -120,8 +120,13 @@ def plot_marker_heatmap(
 
     for ct in cell_types:
         mask = adata.obs[label_column] == ct
-        subset = adata[mask, all_genes]
-        X = subset.layers[layer] if layer else subset.X
+        # Use integer indexing to avoid anndata 0.12.x boolean mask bug
+        mask_indices = np.where(mask)[0]
+        gene_indices = [adata.var_names.get_loc(g) for g in all_genes]
+        if layer:
+            X = adata.layers[layer][mask_indices][:, gene_indices]
+        else:
+            X = adata.X[mask_indices][:, gene_indices]
         if hasattr(X, "toarray"):
             X = X.toarray()
         mean_expr.loc[ct] = np.mean(X, axis=0)
@@ -266,7 +271,15 @@ def plot_2d_validation(
     successful_types = []
     for cell_type, ct_markers in types_to_plot:
         mask = adata.obs[label_column] == cell_type
-        subset = adata[mask].copy()
+        # Manual AnnData construction to avoid anndata 0.12.x bug in adata[mask].copy()
+        mask_indices = np.where(mask)[0]
+        subset = ad.AnnData(
+            X=adata.X[mask_indices].copy() if hasattr(adata.X[mask_indices], 'copy') else adata.X[mask_indices],
+            obs=adata.obs.iloc[mask_indices].copy(),
+            var=adata.var.copy(),
+        )
+        if 'norm' in adata.layers:
+            subset.layers['norm'] = adata.layers['norm'][mask_indices]
         confidence = subset.obs[confidence_column].values
 
         try:
@@ -467,10 +480,17 @@ def plot_marker_dotplot(
     frac_expr = np.zeros((n_types, n_genes))
     mean_expr = np.zeros((n_types, n_genes))
 
+    # Pre-compute gene indices once (outside loop)
+    gene_indices = [adata.var_names.get_loc(g) for g in all_genes]
+
     for i, ct in enumerate(cell_types):
         mask = adata.obs[label_column] == ct
-        subset = adata[mask, all_genes]
-        X = subset.layers[layer] if layer else subset.X
+        # Use integer indexing to avoid anndata 0.12.x boolean mask bug
+        mask_indices = np.where(mask)[0]
+        if layer:
+            X = adata.layers[layer][mask_indices][:, gene_indices]
+        else:
+            X = adata.X[mask_indices][:, gene_indices]
         if hasattr(X, "toarray"):
             X = X.toarray()
 

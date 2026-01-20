@@ -220,10 +220,12 @@ def train_and_annotate(
     -------
     AnnData
         Annotated data with new columns (CellxGene standard names):
-        - cell_type: Predicted cell type
+        - cell_type: Final cell type labels (ontology-mapped, confidence-filtered).
+          Low-confidence cells are marked "Unassigned".
         - cell_type_confidence: Z-score transformed confidence [0, 1]
         - cell_type_ontology_term_id: CL:XXXXX (if add_ontology=True)
-        - cell_type_ontology_label: Canonical name (if add_ontology=True)
+        - cell_type_ontology_label: Canonical ontology name for ALL cells
+          (unfiltered, preserves predictions for low-confidence cells)
 
         And metadata in uns:
         - spatialcore_annotation: Dict with training parameters and stats
@@ -387,30 +389,10 @@ def train_and_annotate(
     )
 
     # -------------------------------------------------------------------------
-    # Stage 7: Apply confidence threshold
-    # -------------------------------------------------------------------------
-    if confidence_threshold > 0:
-        conf = adata.obs["cell_type_confidence"].values
-        low_conf_mask = conf < confidence_threshold
-        n_low = low_conf_mask.sum()
-
-        if n_low > 0:
-            # Mark low-confidence cells as Unassigned
-            labels = adata.obs["cell_type"].astype(str).copy()
-            labels[low_conf_mask] = "Unassigned"
-            adata.obs["cell_type"] = pd.Categorical(labels)
-
-            pct = 100 * n_low / adata.n_obs
-            logger.info(
-                f"Stage 7: Marked {n_low:,} cells ({pct:.1f}%) as Unassigned "
-                f"(confidence < {confidence_threshold})"
-            )
-
-    # -------------------------------------------------------------------------
-    # Stage 8: Add ontology IDs to predictions
+    # Stage 7: Add ontology IDs to predictions
     # -------------------------------------------------------------------------
     if add_ontology:
-        logger.info("Stage 8: Mapping predictions to Cell Ontology...")
+        logger.info("Stage 7: Mapping predictions to Cell Ontology...")
 
         adata, _, _ = add_ontology_ids(
             adata,
@@ -422,10 +404,10 @@ def train_and_annotate(
         )
 
     # -------------------------------------------------------------------------
-    # Stage 9: Generate validation plots
+    # Stage 8: Generate validation plots
     # -------------------------------------------------------------------------
     if generate_plots:
-        logger.info("Stage 9: Generating validation plots...")
+        logger.info("Stage 8: Generating validation plots...")
 
         # Release training artifacts before memory-intensive plot generation
         del model
@@ -450,6 +432,26 @@ def train_and_annotate(
             )
         except Exception as e:
             logger.warning(f"Plot generation failed: {e}")
+
+    # -------------------------------------------------------------------------
+    # Stage 9: Apply confidence threshold (after plots, so plots show all cells)
+    # -------------------------------------------------------------------------
+    if confidence_threshold > 0:
+        conf = adata.obs["cell_type_confidence"].values
+        low_conf_mask = conf < confidence_threshold
+        n_low = low_conf_mask.sum()
+
+        if n_low > 0:
+            # Mark low-confidence cells as Unassigned in cell_type
+            labels = adata.obs["cell_type"].astype(str).copy()
+            labels[low_conf_mask] = "Unassigned"
+            adata.obs["cell_type"] = pd.Categorical(labels)
+
+            pct = 100 * n_low / adata.n_obs
+            logger.info(
+                f"Stage 9: Marked {n_low:,} cells ({pct:.1f}%) as Unassigned "
+                f"(confidence < {confidence_threshold})"
+            )
 
     # -------------------------------------------------------------------------
     # Store metadata

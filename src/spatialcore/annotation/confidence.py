@@ -724,11 +724,12 @@ def filter_by_marker_validation(
             continue
 
         # Calculate mean marker expression for cells of this type
-        # Use .X if normalized, or first available layer
-        if hasattr(adata.X, "toarray"):
-            expr_matrix = adata[type_mask, available_markers].X.toarray()
-        else:
-            expr_matrix = adata[type_mask, available_markers].X
+        # Use integer indexing to avoid anndata 0.12.x boolean mask bug
+        mask_indices = np.where(type_mask)[0]
+        gene_indices = [adata.var_names.get_loc(g) for g in available_markers]
+        expr_matrix = adata.X[mask_indices][:, gene_indices]
+        if hasattr(expr_matrix, "toarray"):
+            expr_matrix = expr_matrix.toarray()
 
         mean_marker_expr = np.mean(expr_matrix, axis=1)
         marker_scores[type_mask] = mean_marker_expr
