@@ -62,6 +62,8 @@ DEFAULT_EXCLUDE_LABELS = [
     "null",
     "doublet",
     "Doublet",
+    "multiplet",
+    "Multiplet",
     "low quality",
     "Low quality",
 ]

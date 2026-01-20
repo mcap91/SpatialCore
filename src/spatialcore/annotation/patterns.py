@@ -37,7 +37,7 @@ CELL_TYPE_PATTERNS = {
     r"effector.*memory|\btem\b": "effector memory t cell",
     r"central.*memory|\btcm\b": "central memory t cell",
     r"exhausted.*t": "exhausted t cell",
-    r"^t\s*cell|^t\s+cells": "t cell",
+    r"^t\s*cell|^t\s+cells|^t$": "t cell",
 
     # B cells
     r"cd19.*cd20.*b\b|cd20.*cd19.*b\b": "b cell",
@@ -47,16 +47,16 @@ CELL_TYPE_PATTERNS = {
     r"memory.*b": "memory b cell",
     r"naive.*b": "naive b cell",
     r"plasma.*blast|plasmablast": "plasmablast",
-    r"^b\s*cell|^b\s+cells?$": "b cell",
+    r"^b\s*cell|^b\s+cells?$|^b$": "b cell",
 
     # Plasma cells with immunoglobulin types
     r"iga\+?\s*plasma": "iga plasmacyte",
     r"igg\+?\s*plasma": "igg plasmacyte",
     r"igm\+?\s*plasma": "igm plasmacyte",
-    r"^plasma\s*cell|^plasma\s*$": "plasma cell",
+    r"^plasma\s*cell|^plasma\s*$|b[_\s\-]*plasma": "plasma cell",
 
     # NK cells
-    r"\bnk\s*cell|\bnatural\s*killer": "natural killer cell",
+    r"\bnk\b|\bnatural\s*killer": "natural killer cell",
     r"cd56.*bright|bright.*nk": "cd56-bright natural killer cell",
     r"cd56.*dim|dim.*nk": "cd56-dim natural killer cell",
 
@@ -82,7 +82,7 @@ CELL_TYPE_PATTERNS = {
     # Macrophages
     r"m1.*macrophage|macrophage.*m1": "inflammatory macrophage",
     r"m2.*macrophage|macrophage.*m2": "alternatively activated macrophage",
-    r"alveolar.*macrophage|alveolar.*\bmph\b": "alveolar macrophage",
+    r"alveolar.*macrophage|alveolar.*\bmph\b|macrophage.*alveolar|mac.*alv": "alveolar macrophage",
     r"kupffer": "kupffer cell",
     r"tissue.*resident.*macro": "tissue-resident macrophage",
     r"macrophages?|\bmph\b": "macrophage",
@@ -108,7 +108,7 @@ CELL_TYPE_PATTERNS = {
     r"myofibroblast": "myofibroblast cell",
     r"cancer.*associated.*fibro|caf": "cancer associated fibroblast",
     r"fibroblasts?|reticular\s+fibroblast": "fibroblast",
-    r"smooth\s*muscle": "smooth muscle cell",
+    r"smooth\s*muscle|\bsmc[s]?\b": "smooth muscle cell",
     r"pericyte": "pericyte",
     r"mesenchymal.*stem|^msc\b": "mesenchymal stem cell",
     r"stromal": "stromal cell",
@@ -142,10 +142,11 @@ CELL_TYPE_PATTERNS = {
     # Lung/Airway
     r"ciliated": "ciliated epithelial cell",
     r"\bclub\b|clara": "club cell",
-    r"alveolar.*type.*1|at1|pneumocyte.*type.*1": "type i pneumocyte",
-    r"alveolar.*type.*2|at2|pneumocyte.*type.*2": "type ii pneumocyte",
+    r"alveolar.*type.*1|\bat1\b|\bati\b|pneumocyte.*type.*1": "type i pneumocyte",
+    r"alveolar.*type.*2|\bat2\b|\batii\b|pneumocyte.*type.*2": "type ii pneumocyte",
     r"basal.*epithelial|basal\s*cell": "basal cell",
     r"secretory.*epitheli": "secretory cell",
+    r"\bpnec[s]?\b|pulmonary.*neuroendocrine": "pulmonary neuroendocrine cell",
 
     # Liver
     r"hepatocyte": "hepatocyte",
