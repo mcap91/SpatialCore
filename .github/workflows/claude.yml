@@ -6,6 +6,12 @@ on:
   pull_request_review_comment:
     types: [created]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  id-token: write
+
 jobs:
   claude:
     runs-on: ubuntu-latest
