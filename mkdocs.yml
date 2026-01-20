@@ -47,7 +47,7 @@ nav:
   - Cell Typing:
     - "Overview": celltyping/index.md
     - "Benchmarks": celltyping/benchmarks.md
-    - "Pipeline & API": celltyping/pipeline.md
+    - "Pipeline & API": celltyping/api.md
     - "Validation & Rationale": celltyping/validation.md
 
 # Plugins

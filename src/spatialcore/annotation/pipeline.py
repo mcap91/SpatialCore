@@ -63,6 +63,8 @@ class TrainingConfig:
         Maximum cells per cell type after balancing.
     max_cells_per_ref : int, default 100000
         Maximum cells to load per reference (memory management).
+    target_proportions : Dict[str, float], str, or Path, optional
+        Expected biological proportions for specific cell types.
     confidence_threshold : float, default 0.8
         Threshold for marking low-confidence predictions as Unassigned.
     add_ontology : bool, default True
@@ -87,6 +89,7 @@ class TrainingConfig:
     balance_strategy: Literal["proportional", "equal"] = "proportional"
     max_cells_per_type: int = 10000
     max_cells_per_ref: int = 100000
+    target_proportions: Optional[Union[Dict[str, float], str, Path]] = None
     confidence_threshold: float = 0.8
     add_ontology: bool = True
     generate_plots: bool = True
@@ -141,6 +144,7 @@ def train_and_annotate(
     balance_strategy: Literal["proportional", "equal"] = "proportional",
     max_cells_per_type: int = 10000,
     max_cells_per_ref: int = 100000,
+    target_proportions: Optional[Union[Dict[str, float], str, Path]] = None,
     confidence_threshold: float = 0.8,
     model_output: Optional[Union[str, Path]] = None,
     plot_output: Optional[Union[str, Path]] = None,
@@ -200,6 +204,12 @@ def train_and_annotate(
         Maximum cells per cell type after balancing.
     max_cells_per_ref : int, default 100000
         Maximum cells to load per reference (memory management).
+    target_proportions : Dict[str, float], str, or Path, optional
+        Expected biological proportions for specific cell types. Use when
+        combining tissue references with FACS-sorted or enriched populations.
+        Accepts dict, JSON file path, or CSV file path. Keys are cell type
+        labels, values are target proportions (0-1). Cell types not in the
+        dict use default max_cells_per_type behavior.
     confidence_threshold : float, default 0.8
         Cells with confidence below this threshold are marked "Unassigned".
     model_output : str or Path, optional
@@ -327,6 +337,7 @@ def train_and_annotate(
         source_column="reference_source",
         source_balance=balance_strategy,
         max_cells_per_type=max_cells_per_type,
+        target_proportions=target_proportions,
         copy=True,
     )
     logger.info(f"  Balanced: {balanced.n_obs:,} cells")
