@@ -158,5 +158,5 @@ The pipeline generates standard QC plots to verify that predictions are biologic
 
 ## 🔗 Next Steps
 
-- **[Pipeline & API Reference](pipeline.md)** — Detailed function signatures, parameters, and low-level control.
+- **[Pipeline & API Reference](api.md)** — Detailed function signatures, parameters, and low-level control.
 - **[Validation & Design Rationale](validation.md)** — Evidence for design decisions, benchmark data, and algorithm details.

@@ -190,7 +190,7 @@ balanced = subsample_balanced(
 
 For detailed scenarios and validation, see [validation.md](validation.md).
 
-For the full API reference, see [pipeline.md](pipeline.md).
+For the full API reference, see [api.md](api.md).
 
 ---
 
