@@ -364,10 +364,16 @@ def train_and_annotate(
     model = training_result["model"]
     n_training_cells = balanced.n_obs
 
-    # Save model to user-defined path
-    model_path = Path(model_output)
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    save_model_artifacts(
+    # Save model to user-defined path (use temp dir if not specified)
+    if model_output is None:
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="spatialcore_model_")
+        model_path = Path(temp_dir) / "model"
+        logger.info("  No model_output specified, using temporary directory")
+    else:
+        model_path = Path(model_output)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+    artifacts = save_model_artifacts(
         model,
         output_dir=model_path.parent,
         model_name=model_path.stem,
@@ -379,7 +385,9 @@ def train_and_annotate(
             "cell_types": training_result["cell_types"],
         },
     )
-    logger.info(f"  Model saved to: {model_path}")
+    # Use actual model path returned by save_model_artifacts (includes .pkl extension)
+    actual_model_path = artifacts["model_path"]
+    logger.info(f"  Model saved to: {actual_model_path}")
 
     # Release training data
     del balanced
@@ -392,7 +400,7 @@ def train_and_annotate(
 
     adata = annotate_celltypist(
         adata,
-        custom_model_path=model_path,
+        custom_model_path=actual_model_path,
         confidence_transform="zscore",
         store_decision_scores=True,
         min_confidence=0.0,
@@ -540,6 +548,7 @@ def train_and_annotate_config(
         balance_strategy=config.balance_strategy,
         max_cells_per_type=config.max_cells_per_type,
         max_cells_per_ref=config.max_cells_per_ref,
+        target_proportions=config.target_proportions,
         confidence_threshold=config.confidence_threshold,
         model_output=model_output,
         plot_output=plot_output,

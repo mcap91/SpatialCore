@@ -6,7 +6,7 @@ before training to catch data quality issues early:
 
 1. Column existence
 2. Null/empty value detection
-3. Cardinality checks (2-500 cell types is reasonable)
+3. Cardinality checks (1-500 cell types is reasonable)
 4. Minimum cells per type
 5. Suspicious pattern detection (e.g., numeric-only labels, placeholder values)
 6. Class imbalance detection
@@ -132,7 +132,7 @@ def validate_cell_type_column(
     column: str,
     min_cells_per_type: int = 10,
     max_cell_types: int = 500,
-    min_cell_types: int = 2,
+    min_cell_types: int = 1,
     allow_nulls: bool = False,
     max_null_fraction: float = 0.05,
     check_suspicious_patterns: bool = True,
@@ -143,7 +143,7 @@ def validate_cell_type_column(
     Performs comprehensive checks:
     1. Column existence
     2. Null/empty values (error if >5% by default)
-    3. Cardinality (2-500 cell types)
+    3. Cardinality (1-500 cell types)
     4. Minimum cells per type (10 by default)
     5. Suspicious patterns (numeric-only, placeholders)
     6. Class imbalance (warn if >1000x ratio)
@@ -159,7 +159,7 @@ def validate_cell_type_column(
         will generate a warning.
     max_cell_types : int, default 500
         Maximum number of cell types (warn if exceeded).
-    min_cell_types : int, default 2
+    min_cell_types : int, default 1
         Minimum number of cell types required (error if not met).
     allow_nulls : bool, default False
         If True, allow null values (still warns if >max_null_fraction).
