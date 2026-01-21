@@ -145,7 +145,7 @@ def train_and_annotate(
     tissue: str = "unknown",
     label_columns: List[str],
     balance_strategy: Literal["proportional", "equal"] = "proportional",
-    max_cells_per_type: int = 10000,
+    max_cells_per_type: int = 5000,
     max_cells_per_ref: int = 100000,
     target_proportions: Optional[Union[Dict[str, float], str, Path]] = None,
     confidence_threshold: float = 0.8,
@@ -166,7 +166,7 @@ def train_and_annotate(
 | `tissue` | `str` | `"unknown"` | Tissue type for model naming |
 | `label_columns` | `List[str]` | required | Cell type column per reference (must be provided; no auto-detect) |
 | `balance_strategy` | `str` | `"proportional"` | Source balancing strategy |
-| `max_cells_per_type` | `int` | `10000` | Max cells per type after balancing |
+| `max_cells_per_type` | `int` | `5000` | Max cells per type after balancing |
 | `max_cells_per_ref` | `int` | `100000` | Max cells to load per reference |
 | `target_proportions` | `Dict` / `Path` | `None` | Expected proportions for FACS/enriched cell types |
 | `confidence_threshold` | `float` | `0.8` | Below this → "Unassigned" |
@@ -214,7 +214,7 @@ class TrainingConfig:
     references: List[str] = field(default_factory=list)
     label_columns: List[str]
     balance_strategy: Literal["proportional", "equal"] = "proportional"
-    max_cells_per_type: int = 10000
+    max_cells_per_type: int = 5000
     max_cells_per_ref: int = 100000
     target_proportions: Optional[Union[Dict[str, float], str, Path]] = None
     confidence_threshold: float = 0.8
@@ -233,7 +233,7 @@ label_columns:
   - cell_type
   - cell_type
 balance_strategy: proportional
-max_cells_per_type: 10000
+max_cells_per_type: 5000
 max_cells_per_ref: 100000
 confidence_threshold: 0.8
 add_ontology: true
@@ -352,7 +352,7 @@ Source-aware balanced subsampling with semantic grouping and target proportions.
 def subsample_balanced(
     adata: AnnData,
     label_column: str,
-    max_cells_per_type: int = 10000,
+    max_cells_per_type: int = 5000,
     min_cells_per_type: int = 50,
     source_column: Optional[str] = "reference_source",
     source_balance: Literal["proportional", "equal"] = "proportional",
@@ -392,7 +392,7 @@ FOR each cell_type (or CL ID group):
   1. IDENTIFY SOURCES that have this type
   2. CALCULATE per-source targets:
      IF source_balance == "proportional":
-       target[src] = total × (src_count / total_count)
+       target[src] = total x (src_count / total_count)
      ELSE (equal):
        target[src] = total / n_sources
   3. ENFORCE minimums
@@ -410,8 +410,8 @@ Macrophage: 35K total (Study1: 30K, Study2: 5K)
 Target: 10K cells
 
 PROPORTIONAL BALANCE:
-  Study1: 10K × (30K/35K) = 8,571 cells
-  Study2: 10K × (5K/35K)  = 1,429 cells
+  Study1: 10K x (30K/35K) = 8,571 cells
+  Study2: 10K x (5K/35K)  = 1,429 cells
 
 EQUAL BALANCE:
   Study1: 5,000 cells
@@ -436,10 +436,15 @@ The `target_proportions` parameter solves this by specifying expected biological
 balanced = subsample_balanced(
     combined,
     label_column="original_label",
-    max_cells_per_type=10000,
+    max_cells_per_type=5000,
     target_proportions={"NK cell": 0.0025},  # 0.25% of training data
 )
 ```
+
+Targets are resolved against the final balanced output size (after min/max
+constraints), with `min_cells_per_type` as a floor. `target_proportions` entries
+must exist in the data and must sum to <= 1.0; if they sum to 1.0, all types
+must be specified.
 
 **Supported formats:**
 
@@ -635,7 +640,7 @@ balanced = subsample_balanced(
     group_by_column="cell_type_ontology_term_id",
     source_column="reference_source",
     source_balance="proportional",
-    max_cells_per_type=10000,
+    max_cells_per_type=5000,
     # Optional: For FACS/enriched references, specify target proportions
     # target_proportions={"NK cell": 0.0025, "plasma cell": 0.001},
 )
@@ -1242,6 +1247,61 @@ print(markers.get("macrophage"))  # ['CD163', 'CD68', 'MARCO', ...]
 
 ---
 
+### CellTypist Source Modification for Spatial Data
+
+!!! warning "Required: CellTypist Normalization Tolerance Patch"
+
+    CellTypist's default validation expects data normalized to **exactly 10,000 counts per cell** (tolerance of ±1). Spatial transcriptomics platforms (Xenium, CosMx) often normalize to slightly different target sums (e.g., ~10,751). This causes CellTypist annotation to fail even when the data is correctly normalized.
+
+    **SpatialCore requires a local modification to CellTypist's `classifier.py`.**
+
+#### The Problem
+
+| Check | Location | Default | Issue |
+|-------|----------|---------|-------|
+| Max value check | `classifier.py:310,314` | `> 9.22` (log1p(10000)) | Rejects data with target_sum > 10,000 |
+| Target sum warning | `classifier.py:326` | `> 1` | Warns on any deviation from 10,000 |
+
+For spatial data normalized to ~10,751 counts per cell:
+- `log1p(10751) ≈ 9.28` exceeds the 9.22 threshold → **ValueError**
+- Even valid spatial data fails annotation
+
+#### The Fix
+
+Modify `celltypist/classifier.py` in your Python environment:
+
+**File location:**
+```
+{your_conda_env}/Lib/site-packages/celltypist/classifier.py
+```
+
+**Changes (3 lines):**
+
+| Line | Original | Modified |
+|------|----------|----------|
+| 310 | `self.adata.X[:1000].max() > 9.22` | `self.adata.X[:1000].max() > 9.62` |
+| 314 | `self.adata.raw.X[:1000].max() > 9.22` | `self.adata.raw.X[:1000].max() > 9.62` |
+| 326 | `np.abs(np.expm1(self.indata[0]).sum()-10000) > 1` | `np.abs(np.expm1(self.indata[0]).sum()-10000) > 5001` |
+
+**What this allows:**
+- Max value threshold: `9.62 = log1p(15000)` — accepts data normalized up to ~15,000 counts/cell
+- Target sum warning: Only warns if deviation exceeds 5,000 from 10,000 (i.e., outside 5k-15k range)
+
+#### Reapplying After CellTypist Update
+
+If you reinstall or upgrade CellTypist, you must reapply this patch:
+
+```python
+# Find your celltypist installation
+import celltypist
+print(celltypist.__file__)  # Shows path to __init__.py
+# classifier.py is in the same directory
+```
+
+Then edit `classifier.py` with the changes above.
+
+---
+
 ### Error Handling
 
 #### Common Errors
@@ -1283,6 +1343,7 @@ os.environ["SYNAPSE_AUTH_TOKEN"] = "your-token"
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.6 | 2026-01-21 | **CellTypist patch required:** Documented required modification to `celltypist/classifier.py` for spatial data compatibility. Changed normalization tolerance from 10k±1 to 5k-15k range to accommodate platform-specific target sums. |
 | 3.5 | 2026-01-20 | **Breaking change:** Removed `norm_layer` parameter from `annotate_celltypist()`. Function now auto-detects input data state using `check_normalization_status()` and normalizes via `ensure_normalized()`. Accepts raw counts in `.X`, `.layers['counts']`, `.raw.X`, or pre-normalized log1p(10k) data. |
 | 3.4 | 2026-01-19 | Confidence filtering moved to after plot generation; plots now show all cells |
 | 3.3 | 2026-01-18 | Added `target_proportions` parameter to `subsample_balanced()` for handling pure/enriched cell type references (FACS, sorted populations) |

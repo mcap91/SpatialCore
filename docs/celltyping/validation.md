@@ -252,7 +252,7 @@ The `target_proportions` parameter caps enriched cell types at expected biologic
 balanced = subsample_balanced(
     combined,
     label_column="cell_type",
-    max_cells_per_type=10000,
+    max_cells_per_type=5000,
     target_proportions={
         "NK cell": 0.0025,      # 0.25% biological frequency
         "plasma cell": 0.005,   # 0.5% biological frequency

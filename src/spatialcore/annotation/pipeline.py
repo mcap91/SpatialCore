@@ -88,7 +88,7 @@ class TrainingConfig:
     references: List[str] = field(default_factory=list)
     label_columns: Optional[List[str]] = None
     balance_strategy: Literal["proportional", "equal"] = "proportional"
-    max_cells_per_type: int = 10000
+    max_cells_per_type: int = 5000
     max_cells_per_ref: int = 100000
     target_proportions: Optional[Union[Dict[str, float], str, Path]] = None
     confidence_threshold: float = 0.8
@@ -156,7 +156,7 @@ def train_and_annotate(
     tissue: str = "unknown",
     label_columns: Optional[List[str]] = None,
     balance_strategy: Literal["proportional", "equal"] = "proportional",
-    max_cells_per_type: int = 10000,
+    max_cells_per_type: int = 5000,
     max_cells_per_ref: int = 100000,
     target_proportions: Optional[Union[Dict[str, float], str, Path]] = None,
     confidence_threshold: float = 0.8,

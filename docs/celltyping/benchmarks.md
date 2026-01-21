@@ -133,7 +133,7 @@ adata = train_and_annotate(
     label_columns=["cell_type"] * len(reference_paths),
     tissue="lung",
     balance_strategy="proportional",
-    max_cells_per_type=10000,
+    max_cells_per_type=5000,
     max_cells_per_ref=100000,
     confidence_threshold=0.8,
     model_output="models/lung_nsclc_custom_v1.pkl",
@@ -177,7 +177,7 @@ balanced = subsample_balanced(
     group_by_column="cell_type_ontology_term_id",  # Group by CL ID
     source_column="reference_source",
     source_balance="proportional",
-    max_cells_per_type=10000,
+    max_cells_per_type=5000,
     copy=True,
 )
 ```

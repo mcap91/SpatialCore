@@ -69,6 +69,11 @@ DEFAULT_EXCLUDE_LABELS = [
     "Multiplet",
     "low quality",
     "Low quality",
+    "low_count",
+    "Low_count",
+    "LOW_COUNT",
+    "low count",
+    "Low count",
 ]
 
 
@@ -207,7 +212,7 @@ def combine_references(
     >>> balanced = subsample_balanced(
     ...     combined,
     ...     label_column="original_label",
-    ...     max_cells_per_type=10000,
+    ...     max_cells_per_type=5000,
     ...     source_balance="proportional",
     ... )
     """
@@ -1055,10 +1060,127 @@ def _load_target_proportions(
     return props
 
 
+def _resolve_target_totals(
+    type_counts: pd.Series,
+    min_cells_per_type: int,
+    max_cells_per_type: int,
+    props: Optional[Dict[str, float]],
+) -> Dict[str, int]:
+    """
+    Resolve per-type target counts, honoring target proportions against the
+    final output size.
+    """
+    if not props:
+        targets: Dict[str, int] = {}
+        for cell_type, n_available in type_counts.items():
+            if n_available <= min_cells_per_type:
+                targets[cell_type] = int(n_available)
+            else:
+                targets[cell_type] = int(min(max_cells_per_type, n_available))
+        return targets
+
+    missing = sorted(set(props) - set(type_counts.index))
+    if missing:
+        raise ValueError(
+            "target_proportions include cell types not found in data: "
+            + ", ".join(missing)
+        )
+
+    sum_props = float(sum(props.values()))
+    eps = 1e-6
+    non_prop_types = [ct for ct in type_counts.index if ct not in props]
+
+    if sum_props > 1.0 + eps:
+        raise ValueError(
+            f"target_proportions sum to {sum_props:.4f}, must be <= 1.0"
+        )
+    if sum_props >= 1.0 - eps and non_prop_types:
+        raise ValueError(
+            "target_proportions sum to 1.0 but there are cell types without "
+            "target proportions. Provide proportions for all types or "
+            "reduce the total."
+        )
+
+    fixed_counts: Dict[str, int] = {}
+    variable_props: Dict[str, int] = {}
+
+    for cell_type, n_available in type_counts.items():
+        if cell_type in props and n_available > min_cells_per_type:
+            variable_props[cell_type] = int(n_available)
+        else:
+            if n_available <= min_cells_per_type:
+                fixed_counts[cell_type] = int(n_available)
+            else:
+                fixed_counts[cell_type] = int(min(max_cells_per_type, n_available))
+
+    fixed_total = sum(fixed_counts.values())
+
+    if not variable_props:
+        return fixed_counts
+
+    sum_props_variable = sum(props[ct] for ct in variable_props)
+    if sum_props_variable >= 1.0 - eps and fixed_total > 0:
+        raise ValueError(
+            "target_proportions leave no room for fixed counts. "
+            "Reduce target_proportions or min_cells_per_type."
+        )
+
+    total = fixed_total
+    if sum_props_variable > eps and (1.0 - sum_props_variable) > eps:
+        total = int(round(fixed_total / (1.0 - sum_props_variable)))
+    total = max(total, fixed_total)
+
+    targets_var: Dict[str, int] = {}
+    for _ in range(50):
+        targets_var = {}
+        for cell_type, n_available in variable_props.items():
+            desired = int(props[cell_type] * total)
+            target = max(min_cells_per_type, desired)
+            target = min(target, n_available)
+            targets_var[cell_type] = int(target)
+        new_total = fixed_total + sum(targets_var.values())
+        if new_total == total:
+            break
+        total = new_total
+    else:
+        raise RuntimeError(
+            "Failed to resolve target_proportions. "
+            "Check target_proportions and cell counts."
+        )
+
+    targets = dict(fixed_counts)
+    targets.update(targets_var)
+
+    total = sum(targets.values())
+    for cell_type, prop in props.items():
+        n_available = int(type_counts[cell_type])
+        desired = int(prop * total)
+        target = targets[cell_type]
+        if n_available <= min_cells_per_type:
+            logger.warning(
+                f"Target proportion for '{cell_type}' cannot be met: "
+                f"only {n_available} cells available (min_cells_per_type="
+                f"{min_cells_per_type})."
+            )
+            continue
+        if desired < min_cells_per_type and n_available >= min_cells_per_type:
+            logger.warning(
+                f"Target proportion for '{cell_type}' below min_cells_per_type; "
+                f"using floor {min_cells_per_type} instead of {desired}."
+            )
+        elif desired > n_available:
+            logger.warning(
+                f"Target proportion for '{cell_type}' exceeds availability; "
+                f"capping at {n_available} instead of {desired}."
+            )
+
+    return targets
+
+
 def subsample_balanced(
     adata: ad.AnnData,
     label_column: str,
-    max_cells_per_type: int = 10000,
+    max_cells_per_type: int = 5000,
     min_cells_per_type: int = 50,
     source_column: Optional[str] = "reference_source",
     source_balance: str = "proportional",
@@ -1081,7 +1203,7 @@ def subsample_balanced(
         Combined reference data (output of combine_references()).
     label_column : str
         Column in adata.obs containing cell type labels (for logging/display).
-    max_cells_per_type : int, default 10000
+    max_cells_per_type : int, default 5000
         Maximum cells per cell type in output.
     min_cells_per_type : int, default 50
         Cell types with fewer cells than this are kept entirely
@@ -1111,7 +1233,7 @@ def subsample_balanced(
         - Path to CSV file with columns: ``cell_type``, ``proportion``
 
         For cell types in this mapping, the target count is calculated as:
-        ``proportion × total_input_cells`` instead of using max_cells_per_type.
+        ``proportion x total_output_cells`` instead of using max_cells_per_type.
 
         Cell types NOT in the mapping use normal max_cells_per_type capping.
 
@@ -1148,7 +1270,7 @@ def subsample_balanced(
     >>> balanced = subsample_balanced(
     ...     combined,
     ...     label_column="unified_cell_type",
-    ...     max_cells_per_type=10000,
+    ...     max_cells_per_type=5000,
     ...     source_balance="proportional",
     ... )
 
@@ -1229,6 +1351,13 @@ def subsample_balanced(
         cell_types = adata.obs[label_column].astype(str)
 
     unique_types = cell_types.unique()
+    type_counts = cell_types.value_counts()
+    target_totals = _resolve_target_totals(
+        type_counts=type_counts,
+        min_cells_per_type=min_cells_per_type,
+        max_cells_per_type=max_cells_per_type,
+        props=props,
+    )
 
     # =========================================================================
     # Source-unaware mode (simple capping)
@@ -1240,7 +1369,8 @@ def subsample_balanced(
         )
         return _subsample_simple_cap(
             adata, cell_types, unique_types,
-            max_cells_per_type, min_cells_per_type, rng
+            max_cells_per_type, min_cells_per_type, rng,
+            target_totals=target_totals,
         )
 
     # =========================================================================
@@ -1280,10 +1410,12 @@ def subsample_balanced(
         if n_available == 0:
             continue
 
-        # Keep all if below minimum
-        if n_available <= min_cells_per_type:
+        target_total = target_totals[cell_type]
+        if target_total >= n_available:
             selected_indices.extend(type_indices)
-            logger.debug(f"  {cell_type}: keeping all {n_available} (below min)")
+            logger.debug(
+                f"  {cell_type}: keeping all {n_available} (target {target_total})"
+            )
             continue
 
         # Identify which sources have this cell type
@@ -1297,22 +1429,6 @@ def subsample_balanced(
                 f"  {cell_type}: only in '{sources_with_type[0]}' "
                 f"(no cross-source balancing)"
             )
-
-        # Calculate target per cell type
-        if props and cell_type in props:
-            # Use proportion-based target for specified types (Cap & Fill)
-            # Cap: don't exceed proportion × total_cells
-            # Fill: but ensure at least min_cells_per_type for training quality
-            proportion_target = int(props[cell_type] * adata.n_obs)
-            capped_target = min(proportion_target, n_available)
-            target_total = max(min_cells_per_type, capped_target)
-            logger.debug(
-                f"  {cell_type}: proportion {props[cell_type]:.4f} -> "
-                f"{proportion_target} cells (cap&fill: {target_total})"
-            )
-        else:
-            # Use normal capping for unspecified types
-            target_total = min(max_cells_per_type, n_available)
 
         # Calculate per-source targets
         source_targets = _calculate_source_targets(
@@ -1438,6 +1554,7 @@ def _subsample_simple_cap(
     max_cells_per_type: int,
     min_cells_per_type: int,
     rng: np.random.Generator,
+    target_totals: Optional[Dict[str, int]] = None,
 ) -> ad.AnnData:
     """
     Simple per-type capping without source awareness.
@@ -1453,12 +1570,22 @@ def _subsample_simple_cap(
 
         if n_available == 0:
             continue
-        elif n_available <= min_cells_per_type:
+
+        if target_totals is None:
+            if n_available <= min_cells_per_type:
+                selected_indices.extend(type_indices)
+            elif n_available <= max_cells_per_type:
+                selected_indices.extend(type_indices)
+            else:
+                sampled = rng.choice(type_indices, size=max_cells_per_type, replace=False)
+                selected_indices.extend(sampled)
+            continue
+
+        target_total = target_totals[cell_type]
+        if target_total >= n_available:
             selected_indices.extend(type_indices)
-        elif n_available <= max_cells_per_type:
-            selected_indices.extend(type_indices)
-        else:
-            sampled = rng.choice(type_indices, size=max_cells_per_type, replace=False)
+        elif target_total > 0:
+            sampled = rng.choice(type_indices, size=target_total, replace=False)
             selected_indices.extend(sampled)
 
     selected_indices = sorted(selected_indices)
