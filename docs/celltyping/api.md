@@ -1279,12 +1279,12 @@ Modify `celltypist/classifier.py` in your Python environment:
 
 | Line | Original | Modified |
 |------|----------|----------|
-| 310 | `self.adata.X[:1000].max() > 9.22` | `self.adata.X[:1000].max() > 9.62` |
-| 314 | `self.adata.raw.X[:1000].max() > 9.22` | `self.adata.raw.X[:1000].max() > 9.62` |
+| 310 | `self.adata.X[:1000].max() > 9.22` | `self.adata.X[:1000].max() > 10.5` |
+| 314 | `self.adata.raw.X[:1000].max() > 9.22` | `self.adata.raw.X[:1000].max() > 10.5` |
 | 326 | `np.abs(np.expm1(self.indata[0]).sum()-10000) > 1` | `np.abs(np.expm1(self.indata[0]).sum()-10000) > 5001` |
 
 **What this allows:**
-- Max value threshold: `9.62 = log1p(15000)` — accepts data normalized up to ~15,000 counts/cell
+- Max value threshold: `10.5 = log1p(36000)` — accepts highly expressed genes in spatial data
 - Target sum warning: Only warns if deviation exceeds 5,000 from 10,000 (i.e., outside 5k-15k range)
 
 #### Reapplying After CellTypist Update
