@@ -470,7 +470,7 @@ def filter_low_count_types(
 
 def compute_confidence_from_obsm(
     adata: ad.AnnData,
-    decision_scores_key: str = "celltypist_decision_scores",
+    decision_scores_key: str = "cell_type_decision_scores",
     method: ConfidenceMethod = "zscore",
     confidence_column: str = "confidence_transformed",
     copy: bool = False,
@@ -485,7 +485,7 @@ def compute_confidence_from_obsm(
     ----------
     adata : AnnData
         AnnData with decision scores in obsm.
-    decision_scores_key : str, default "celltypist_decision_scores"
+    decision_scores_key : str, default "cell_type_decision_scores"
         Key in adata.obsm containing decision score matrix.
     method : {"raw", "zscore", "softmax", "minmax"}, default "zscore"
         Transformation method (see transform_confidence).
@@ -551,8 +551,7 @@ def filter_by_marker_validation(
     - Y-axis: Marker expression score (GMM-3 threshold)
 
     Cells must pass BOTH thresholds to retain their cell type label.
-    Uses `classify_by_threshold()` with `n_components=3` internally for
-    GMM-3 fitting on marker expression.
+    Uses GMM-3 thresholding internally for marker expression.
 
     Parameters
     ----------
@@ -644,20 +643,21 @@ def filter_by_marker_validation(
 
     # Load canonical markers if not provided
     if canonical_markers is None:
-        try:
-            from spatialcore.annotation.markers import load_canonical_markers
-            canonical_markers = load_canonical_markers()
-            logger.info(f"Loaded canonical markers for {len(canonical_markers)} cell types")
-        except Exception as e:
-            logger.warning(f"Could not load canonical markers: {e}")
-            canonical_markers = {}
+        from spatialcore.annotation.markers import load_canonical_markers
+        canonical_markers = load_canonical_markers()
+        logger.info(f"Loaded canonical markers for {len(canonical_markers)} cell types")
 
-    # Get GMM classification function
+    if not canonical_markers:
+        raise ValueError(
+            "Canonical markers are required for marker validation but none were provided or loaded."
+        )
+
+    # Use internal GMM thresholding on 1D marker scores
     try:
-        from spatialcore.stats.classify import classify_by_threshold
+        from spatialcore.stats._thresholding import threshold_gmm
     except ImportError:
         raise ImportError(
-            "spatialcore.stats.classify is required for GMM-3 validation. "
+            "spatialcore.stats._thresholding is required for GMM-3 validation. "
             "Ensure the stats module is properly installed."
         )
 
@@ -708,18 +708,19 @@ def filter_by_marker_validation(
         available_markers = [m for m in markers_for_type if m in adata.var_names]
 
         if not available_markers:
-            logger.debug(f"No canonical markers found for {cell_type}")
-            # All cells pass marker validation if no markers defined
+            logger.warning(f"Skipping marker validation for {cell_type}: no markers available in data")
+            marker_scores[type_mask] = np.nan
             marker_passes[type_mask] = True
+            n_pass_conf = (type_mask & confidence_passes).sum()
             summary_rows.append({
                 "cell_type": cell_type,
                 "n_cells": n_type_cells,
                 "has_markers": False,
                 "gmm_threshold": np.nan,
-                "n_pass_confidence": (type_mask & confidence_passes).sum(),
+                "n_pass_confidence": n_pass_conf,
                 "n_pass_marker": n_type_cells,
-                "n_pass_both": (type_mask & confidence_passes).sum(),
-                "pct_pass": 100 * (type_mask & confidence_passes).sum() / n_type_cells,
+                "n_pass_both": n_pass_conf,
+                "pct_pass": 100 * n_pass_conf / n_type_cells if n_type_cells > 0 else 0,
             })
             continue
 
@@ -736,16 +737,17 @@ def filter_by_marker_validation(
 
         # Fit GMM-3 threshold on marker expression
         try:
-            threshold_result = classify_by_threshold(
+            gmm_threshold, _, _, _ = threshold_gmm(
                 mean_marker_expr,
+                probability_cutoff=0.3,
                 n_components=n_components,
-                method="gmm",
+                random_state=42,
             )
-            gmm_threshold = threshold_result["threshold"]
             type_marker_passes = mean_marker_expr >= gmm_threshold
             marker_passes[type_mask] = type_marker_passes
         except Exception as e:
-            logger.warning(f"GMM fitting failed for {cell_type}: {e}. Marking all as pass.")
+            logger.warning(f"GMM fitting failed for {cell_type}: {e}. Skipping marker validation.")
+            marker_scores[type_mask] = np.nan
             marker_passes[type_mask] = True
             gmm_threshold = np.nan
 

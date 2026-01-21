@@ -1058,7 +1058,10 @@ def add_ontology_ids(
         adata = adata.copy()
 
     if source_col not in adata.obs.columns:
-        raise ValueError(f"Source column '{source_col}' not found in adata.obs")
+        raise ValueError(
+            f"Source column '{source_col}' not found in adata.obs. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
 
     # Use default skip labels if not provided
     labels_to_skip = skip_labels if skip_labels is not None else SKIP_LABELS

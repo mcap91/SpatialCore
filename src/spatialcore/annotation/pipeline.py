@@ -55,8 +55,9 @@ class TrainingConfig:
         Tissue type for the model (used in model naming and selection).
     references : List[str]
         Paths to reference h5ad files. Required.
-    label_columns : List[str], optional
-        Cell type label column for each reference. If None, auto-detect.
+    label_columns : List[str]
+        Cell type label column for each reference. Required: must be provided
+        explicitly to avoid misinterpreting CL IDs as labels.
     balance_strategy : {"proportional", "equal"}, default "proportional"
         How to distribute sampling across sources when balancing.
     max_cells_per_type : int, default 10000
@@ -130,6 +131,19 @@ class TrainingConfig:
         """Create from dictionary."""
         return cls(**data)
 
+    def validate(self) -> None:
+        """
+        Validate required fields.
+
+        Ensures label_columns is provided and non-empty to avoid
+        misinterpreting ontology ID columns as raw labels.
+        """
+        if not self.label_columns:
+            raise ValueError(
+                "TrainingConfig.label_columns is required and cannot be empty. "
+                "Provide one label column per reference."
+            )
+
 
 # ============================================================================
 # High-Level Pipeline
@@ -187,15 +201,18 @@ def train_and_annotate(
     Parameters
     ----------
     adata : AnnData
-        Spatial transcriptomics data to annotate. Must have gene names in
-        var_names (HUGO symbols preferred).
+        Spatial transcriptomics data to annotate. Can contain:
+        - Raw counts in .X (will be normalized automatically)
+        - Raw counts in .layers['counts'] or .raw.X
+        - Already log1p(10k) normalized data in .X
+        Gene names should be HUGO symbols.
     references : List[str or Path]
         Paths to reference h5ad files for training.
     tissue : str, default "unknown"
         Tissue type for model naming.
-    label_columns : List[str], optional
-        Cell type label column for each reference. If None, auto-detect
-        common column names (cell_type, celltype, cell_type_ontology_term_id).
+    label_columns : List[str]
+        Cell type label column for each reference. Required: must be provided
+        explicitly to avoid mis-mapping CL IDs as labels.
     balance_strategy : {"proportional", "equal"}, default "proportional"
         How to distribute sampling across sources:
         - "proportional": Sample proportionally to source contribution
@@ -279,6 +296,11 @@ def train_and_annotate(
     from spatialcore.plotting import generate_annotation_plots
 
     if copy:
+        if adata.isbacked:
+            raise ValueError(
+                "Cannot use copy=True with backed AnnData. "
+                "Either use copy=False or load data into memory first with adata.to_memory()"
+            )
         adata = adata.copy()
 
     logger.info("=" * 60)
@@ -297,9 +319,12 @@ def train_and_annotate(
     # -------------------------------------------------------------------------
     logger.info("Stage 2: Loading and combining references...")
 
-    # Auto-detect label columns if not provided
     if label_columns is None:
-        label_columns = _detect_label_columns(references)
+        raise ValueError(
+            "label_columns must be provided (one per reference). "
+            "Auto-detection was removed to prevent misinterpreting CL ID "
+            "columns as raw labels."
+        )
 
     combined = combine_references(
         reference_paths=references,
@@ -398,6 +423,15 @@ def train_and_annotate(
     # -------------------------------------------------------------------------
     logger.info("Stage 6: Annotating spatial data...")
 
+    # Ensure spatial data is normalized (handles raw counts, pre-normalized, etc.)
+    from spatialcore.core.utils import check_normalization_status
+    from spatialcore.annotation.loading import ensure_normalized
+
+    status = check_normalization_status(adata)
+    if status["x_state"] != "log1p_10k":
+        logger.info(f"  Normalizing spatial data (detected: {status['x_state']})")
+        adata = ensure_normalized(adata, target_sum=1e4, copy=False)
+
     adata = annotate_celltypist(
         adata,
         custom_model_path=actual_model_path,
@@ -433,13 +467,13 @@ def train_and_annotate(
         del training_result
         gc.collect()
 
-        output_dir = Path(plot_output) if plot_output else Path(".")
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         try:
+            output_dir = Path(plot_output) if plot_output else Path(".")
+            output_dir.mkdir(parents=True, exist_ok=True)
+
             generate_annotation_plots(
                 adata,
-                label_column="cell_type_ontology_label",  # Use standardized ontology names
+                label_column="cell_type_ontology_label",
                 confidence_column="cell_type_confidence",
                 output_dir=output_dir,
                 prefix=f"{tissue}_celltyping",
@@ -449,8 +483,12 @@ def train_and_annotate(
                 ontology_name_column="cell_type_ontology_label",
                 ontology_id_column="cell_type_ontology_term_id",
             )
-        except Exception as e:
-            logger.warning(f"Plot generation failed: {e}")
+        except Exception as exc:
+            logger.warning(
+                "Plot generation failed; continuing without plots: %s",
+                exc,
+                exc_info=True,
+            )
 
     # -------------------------------------------------------------------------
     # Stage 9: Apply confidence threshold (after plots, so plots show all cells)
@@ -540,6 +578,7 @@ def train_and_annotate_config(
     >>> # Run pipeline
     >>> adata = train_and_annotate_config(adata, config)
     """
+    config.validate()
     return train_and_annotate(
         adata=adata,
         references=config.references,

@@ -57,6 +57,9 @@ DEFAULT_EXCLUDE_LABELS = [
     "NA",
     "N/A",
     "n/a",
+    "nan",  # Python str(np.nan) produces "nan"
+    "NaN",
+    "NAN",
     "none",
     "None",
     "null",
@@ -599,9 +602,18 @@ def train_celltypist_model(
             f"Label column '{label_column}' not found. Available: {available}"
         )
 
+    # Validate batch_size for mini-batch training
+    n_cells = adata.n_obs
+    if mini_batch and n_cells <= batch_size:
+        raise ValueError(
+            f"Dataset has {n_cells:,} cells but batch_size={batch_size}. "
+            f"Either reduce batch_size (e.g., batch_size={max(50, n_cells // 2)}) "
+            f"or set mini_batch=False for full-batch training."
+        )
+
     # Log training parameters
     logger.info("Training CellTypist model...")
-    logger.info(f"  Cells: {adata.n_obs:,}")
+    logger.info(f"  Cells: {n_cells:,}")
     logger.info(f"  Genes: {adata.n_vars:,}")
     logger.info(f"  Cell types: {adata.obs[label_column].nunique()}")
     logger.info(f"  Mini-batch: {mini_batch}")

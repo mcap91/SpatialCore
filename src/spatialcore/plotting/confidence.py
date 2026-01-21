@@ -340,7 +340,7 @@ def plot_confidence_violin(
 
 def plot_model_contribution(
     adata: ad.AnnData,
-    model_column: str = "celltypist_model",
+    model_column: str = "cell_type_model",
     figsize: tuple = (8, 6),
     title: Optional[str] = None,
     save: Optional[Union[str, Path]] = None,
@@ -355,7 +355,7 @@ def plot_model_contribution(
     ----------
     adata : AnnData
         Annotated data with model source column.
-    model_column : str, default "celltypist_model"
+    model_column : str, default "cell_type_model"
         Column in adata.obs indicating which model made the prediction.
     figsize : tuple, default (8, 6)
         Figure size.

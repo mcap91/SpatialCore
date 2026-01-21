@@ -29,7 +29,7 @@ All outputs use the [CellxGene schema](https://github.com/chanzuckerberg/single-
 |--------|------|-------------|
 | `cell_type` | `str` | Final cell type (ontology-mapped, confidence-filtered) |
 | `cell_type_confidence` | `float` | Z-score transformed confidence [0, 1] |
-| `cell_type_confidence_raw` | `float` | Raw CellTypist decision score |
+| `cell_type_confidence_raw` | `float` | Winning-model probability from CellTypist (decision scores live in `cell_type_decision_scores` when available) |
 | `cell_type_ontology_term_id` | `str` | Cell Ontology ID (e.g., `CL:0000624`) |
 | `cell_type_ontology_label` | `str` | Canonical ontology name (unfiltered, all cells) |
 | `original_label` | `str` | Raw label from source reference |
@@ -143,7 +143,7 @@ def train_and_annotate(
     adata: AnnData,
     references: List[Union[str, Path]],
     tissue: str = "unknown",
-    label_columns: Optional[List[str]] = None,
+    label_columns: List[str],
     balance_strategy: Literal["proportional", "equal"] = "proportional",
     max_cells_per_type: int = 10000,
     max_cells_per_ref: int = 100000,
@@ -164,7 +164,7 @@ def train_and_annotate(
 | `adata` | `AnnData` | required | Spatial data to annotate |
 | `references` | `List[str]` | required | Paths/URIs to reference files |
 | `tissue` | `str` | `"unknown"` | Tissue type for model naming |
-| `label_columns` | `List[str]` | `None` | Cell type column per reference (auto-detect if None) |
+| `label_columns` | `List[str]` | required | Cell type column per reference (must be provided; no auto-detect) |
 | `balance_strategy` | `str` | `"proportional"` | Source balancing strategy |
 | `max_cells_per_type` | `int` | `10000` | Max cells per type after balancing |
 | `max_cells_per_ref` | `int` | `100000` | Max cells to load per reference |
@@ -173,7 +173,7 @@ def train_and_annotate(
 | `model_output` | `Path` | `None` | Save model to this path |
 | `plot_output` | `Path` | `None` | Save plots to this directory |
 | `add_ontology` | `bool` | `True` | Map predictions to CL IDs |
-| `generate_plots` | `bool` | `True` | Generate validation plots |
+| `generate_plots` | `bool` | `True` | Generate validation plots (best-effort; failures logged, pipeline continues) |
 
 **Example:**
 
@@ -212,7 +212,7 @@ For reproducible workflows, use YAML configuration.
 class TrainingConfig:
     tissue: str = "unknown"
     references: List[str] = field(default_factory=list)
-    label_columns: Optional[List[str]] = None
+    label_columns: List[str]
     balance_strategy: Literal["proportional", "equal"] = "proportional"
     max_cells_per_type: int = 10000
     max_cells_per_ref: int = 100000
@@ -229,6 +229,9 @@ tissue: lung
 references:
   - gs://my-bucket/references/hlca.h5ad
   - /local/data/lung.h5ad
+label_columns:
+  - cell_type
+  - cell_type
 balance_strategy: proportional
 max_cells_per_type: 10000
 max_cells_per_ref: 100000
@@ -251,6 +254,9 @@ adata = train_and_annotate_config(adata, config, plot_output="./qc/")
 #### Low-Level Functions
 
 For users who need fine-grained control over each stage.
+
+!!! warning "Panel Gene Filtering"
+    With low-level functions, you're responsible for passing `target_genes` to `combine_references()`. Use `get_panel_genes()` to extract your spatial panel, then pass it to ensure the reference is subset to matching genes.
 
 #### `combine_references()`
 
@@ -551,12 +557,8 @@ def annotate_celltypist(
     min_prop: float = 0.0,
     min_gene_overlap_pct: float = 25.0,
     min_confidence: float = 0.5,
-    norm_layer: str = "norm",
     store_decision_scores: bool = True,
     confidence_transform: Optional[ConfidenceMethod] = "zscore",
-    generate_plots: bool = True,
-    output_dir: Optional[Union[str, Path]] = None,
-    plot_prefix: str = "celltyping",
     copy: bool = False,
 ) -> AnnData:
 ```
@@ -568,6 +570,11 @@ def annotate_celltypist(
     **Spatial (voting DANGEROUS):** Spatial clustering may be coarse. A single "immune" cluster might contain 1000 macrophages, 50 T cells, and 30 B cells. Voting assigns the dominant type to ALL cells — all 1080 become macrophages (WRONG!).
 
     **Solution:** Always use `majority_voting=False` for spatial data.
+
+**Additional constraints:**
+
+- If `majority_voting=True`, you must provide `over_clustering` or have a valid cluster column (e.g., `leiden`) in `adata.obs`. Otherwise a ValueError is raised.
+- `annotate_celltypist()` does not accept a `generate_plots` parameter. Low-level users should call `generate_annotation_plots()` manually after annotation.
 
 ---
 
@@ -665,7 +672,7 @@ xenium, _, _ = add_ontology_ids(
 # ============================================================================
 # STAGE 8: Generate plots (shows all cells with ontology labels)
 # ============================================================================
-# generate_annotation_plots() - threshold line shows cutoff visually
+# generate_annotation_plots() - low-level users must call this manually
 
 # ============================================================================
 # STAGE 9: Apply confidence threshold (last step)
@@ -710,6 +717,8 @@ Phase 3 generates standard validation plots to assess annotation quality.
 
 Generate all validation plots in one call.
 
+In `train_and_annotate()`, plot generation is best-effort (errors are logged and the pipeline continues). When calling `generate_annotation_plots()` directly, exceptions propagate except for the DEG insufficiency case described below.
+
 ```python
 def generate_annotation_plots(
     adata: AnnData,
@@ -736,6 +745,12 @@ def generate_annotation_plots(
 | Confidence | `{prefix}_confidence.png` | Spatial + jitter with threshold |
 | Ontology Table | `{prefix}_ontology_mapping.png` | Mapping statistics |
 
+**Notes:**
+
+- DEG heatmap requires at least 2 cell types with >= 10 cells each. If not met, the DEG heatmap is skipped with a warning.
+- 2D validation uses canonical markers. If no markers are found (or GMM fails for all types), the summary is empty and a placeholder figure is returned.
+- Per-cell-type GMM failures warn and that cell type is skipped in the 2D plot.
+
 **Returns:**
 
 ```python
@@ -755,6 +770,8 @@ def generate_annotation_plots(
     },
 }
 ```
+
+If a plot is skipped (e.g., DEG heatmap due to insufficient cell types), the corresponding figure/path entry may be `None`.
 
 ---
 
@@ -1218,6 +1235,11 @@ markers = load_canonical_markers()
 print(markers.get("macrophage"))  # ['CD163', 'CD68', 'MARCO', ...]
 ```
 
+**Behavior notes:**
+
+- If the canonical markers file is missing or empty, marker-based validation raises an error.
+- Cell types without available markers in the data are skipped during 2D validation.
+
 ---
 
 ### Error Handling
@@ -1227,9 +1249,11 @@ print(markers.get("macrophage"))  # ['CD163', 'CD68', 'MARCO', ...]
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `Cannot safely normalize data` | No raw counts found and X is not verified log1p_10k | Provide raw counts in `adata.layers["counts"]` or use `unsafe_force=True` |
-| `Layer 'norm' not found` | Missing normalized layer | Run `sc.pp.normalize_total` + `sc.pp.log1p` |
+| `Cannot prepare data for CellTypist` | No raw counts found and X is not verified log1p_10k | Provide raw counts in `.X`, `.layers["counts"]`, `.raw.X`, or use pre-normalized log1p(10k) data |
 | `No shared genes found` | Gene format mismatch | Check Ensembl vs HUGO format |
 | `Label column not found` | Wrong column name | List columns with `list(adata.obs.columns)` |
+| `majority_voting=True requires a valid cluster column` | Missing or invalid cluster column | Provide `over_clustering` or add a cluster column (e.g., `leiden`) to `adata.obs` |
+| `No marker genes found in data` | Canonical markers missing/empty or no marker overlap | Provide a markers dict or ensure marker genes are present |
 | `No ontology match` | Novel cell type names | Review unmapped in `_missed.json` |
 | `ImportError: cellxgene-census` | Missing optional dep | `pip install cellxgene-census` |
 | `ImportError: boto3` | Missing S3 dependency | `pip install boto3` |
@@ -1259,6 +1283,7 @@ os.environ["SYNAPSE_AUTH_TOKEN"] = "your-token"
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.5 | 2026-01-20 | **Breaking change:** Removed `norm_layer` parameter from `annotate_celltypist()`. Function now auto-detects input data state using `check_normalization_status()` and normalizes via `ensure_normalized()`. Accepts raw counts in `.X`, `.layers['counts']`, `.raw.X`, or pre-normalized log1p(10k) data. |
 | 3.4 | 2026-01-19 | Confidence filtering moved to after plot generation; plots now show all cells |
 | 3.3 | 2026-01-18 | Added `target_proportions` parameter to `subsample_balanced()` for handling pure/enriched cell type references (FACS, sorted populations) |
 | 3.2 | 2026-01-18 | Robust normalization detection: layer search, integer test with tolerance, expm1 target sum verification, `unsafe_force` parameter |

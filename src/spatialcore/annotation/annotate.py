@@ -185,77 +185,55 @@ def _validate_gene_overlap(
     }
 
 
-def _validate_celltypist_input(
-    adata: ad.AnnData,
-    norm_layer: str = "norm",
-) -> ad.AnnData:
+def _prepare_for_celltypist(adata: ad.AnnData, copy: bool = True) -> ad.AnnData:
     """
-    Validate and prepare AnnData for CellTypist.
+    Prepare AnnData for CellTypist prediction.
 
-    Validates that data is properly normalized (log1p, ~10k sum).
-    Does NOT modify or normalize data - errors if validation fails.
+    Uses check_normalization_status() to detect data state and
+    ensure_normalized() to normalize if needed.
 
     Parameters
     ----------
     adata : AnnData
-        Input data with normalized layer.
-    norm_layer : str, default "norm"
-        Layer containing log1p(10k) normalized data.
+        Input data (raw counts or normalized).
+    copy : bool, default True
+        Return a copy (CellTypist prediction is destructive).
 
     Returns
     -------
     AnnData
-        Copy with validated layer in X.
+        Copy with log1p(10k) normalized data in X.
 
     Raises
     ------
     ValueError
-        If layer doesn't exist or data is not properly normalized.
+        If data cannot be safely normalized.
     """
-    # Step 1: Check layer exists (NO fallback)
-    if norm_layer not in adata.layers:
-        available = list(adata.layers.keys())
-        raise ValueError(
-            f"Layer '{norm_layer}' not found in adata.layers.\n"
-            f"Available layers: {available}\n"
-            f"Ensure normalization has been run before CellTypist annotation."
-        )
+    from spatialcore.core.utils import check_normalization_status
+    from spatialcore.annotation.loading import ensure_normalized
 
-    logger.info(f"Validating adata.layers['{norm_layer}'] for CellTypist...")
-    data = adata.layers[norm_layer]
+    # Always copy for CellTypist (it modifies X during prediction)
+    adata_ct = adata.copy() if copy else adata
 
-    # Handle sparse matrices
-    if hasattr(data, "toarray"):
-        sample = data[:1000].toarray() if data.shape[0] > 1000 else data.toarray()
-    else:
-        sample = data[:1000] if data.shape[0] > 1000 else data
+    # Check current state
+    status = check_normalization_status(adata_ct)
+    logger.info(f"Input data state: x_state={status['x_state']}, raw_source={status['raw_source']}")
 
-    # Step 2: Check log-transformed (NO fallback)
-    data_max = float(np.max(sample))
-    if data_max > 50:
-        raise ValueError(
-            f"Data in layer '{norm_layer}' does not appear to be log-transformed.\n"
-            f"  Max value: {data_max:.2f} (expected < 15 for log1p data)\n"
-            f"  Run normalization pipeline before CellTypist annotation."
-        )
-    logger.info(f"  [OK] Log-transformed (max={data_max:.2f})")
+    # Use ensure_normalized to handle all cases
+    if status["x_state"] != "log1p_10k":
+        if status["raw_source"] is None and not status["is_usable"]:
+            raise ValueError(
+                f"Cannot prepare data for CellTypist.\n"
+                f"  Detected X state: {status['x_state']}\n"
+                f"  Estimated target_sum: {status.get('x_target_sum', 'N/A')}\n"
+                f"  Raw counts found: None\n\n"
+                f"Provide data with:\n"
+                f"  1. Raw counts in .X, .layers['counts'], or .raw.X\n"
+                f"  2. Or log1p(10k) normalized data in .X"
+            )
+        adata_ct = ensure_normalized(adata_ct, target_sum=1e4, copy=False)
 
-    # Step 3: Check sum ~10000 (NO fallback)
-    original_sum = np.expm1(sample).sum(axis=1)
-    mean_sum = float(np.mean(original_sum))
-    if abs(mean_sum - 10000) / 10000 > 0.1:  # 10% tolerance
-        raise ValueError(
-            f"Data in layer '{norm_layer}' not normalized to 10000 counts.\n"
-            f"  Observed mean sum: {mean_sum:.0f} (expected ~10000)\n"
-            f"  Normalize with: sc.pp.normalize_total(adata, target_sum=10000)"
-        )
-    logger.info(f"  [OK] Sum validation passed (mean={mean_sum:.0f})")
-
-    # Step 4: Create copy with validated layer in X
-    adata_ct = adata.copy()
-    adata_ct.X = adata.layers[norm_layer].copy()
-    logger.info(f"  [OK] Prepared: {adata_ct.n_obs:,} cells x {adata_ct.n_vars:,} genes")
-
+    logger.info(f"Prepared: {adata_ct.n_obs:,} cells x {adata_ct.n_vars:,} genes")
     return adata_ct
 
 
@@ -273,7 +251,6 @@ def annotate_celltypist(
     min_prop: float = 0.0,
     min_gene_overlap_pct: float = 25.0,
     min_confidence: float = 0.5,
-    norm_layer: str = "norm",
     store_decision_scores: bool = True,
     confidence_transform: Optional[ConfidenceMethod] = "zscore",
     copy: bool = False,
@@ -311,11 +288,9 @@ def annotate_celltypist(
         Minimum confidence threshold for cell type assignment.
         Cells below this threshold are labeled "Unassigned".
         Set to 0.0 to disable filtering (assign all cells).
-    norm_layer : str, default "norm"
-        Layer containing log1p(10k) normalized data. Must exist in adata.layers.
     store_decision_scores : bool, default True
         Store full decision score matrix in adata.obsm for downstream analysis.
-        Stores in adata.obsm["celltypist_decision_scores"].
+        Stores in adata.obsm["cell_type_decision_scores"].
     confidence_transform : {"raw", "zscore", "softmax", "minmax"} or None, default "zscore"
         Transform method for confidence scores. "zscore" is recommended for
         spatial data. Set to None to skip transformation.
@@ -328,7 +303,8 @@ def annotate_celltypist(
         AnnData with new columns in obs (CellxGene standard names):
         - cell_type: Final cell type labels
         - cell_type_confidence: Transformed confidence (z-score by default)
-        - cell_type_confidence_raw: Raw confidence scores from CellTypist
+        - cell_type_confidence_raw: Winning-model probability (CellTypist default).
+          Decision scores are stored separately in obsm when available.
         - cell_type_model: Which model contributed each prediction
         - cell_type_original: Per-cell predictions (before any voting)
 
@@ -337,10 +313,36 @@ def annotate_celltypist(
 
     Notes
     -----
+    **Input data handling:**
+
+    Input data can be:
+    - Raw counts in .X (will be normalized automatically)
+    - Raw counts in .layers['counts'] or .raw.X (will be found and normalized)
+    - Already log1p(10k) normalized in .X (will be used directly)
+
+    The function auto-detects data state using check_normalization_status()
+    and normalizes using ensure_normalized() if needed.
+
+    **Majority voting:**
+
     For spatial data, majority_voting=False is recommended because:
     1. Spatial clustering may be coarse (few clusters)
     2. Voting assigns dominant type to ALL cells in cluster
     3. This can collapse 13 cell types to 2 types
+
+    **Ensemble mode confidence (LIMITATION):**
+
+    When using ensemble_mode=True with pre-trained models, the z-score confidence
+    transformation is NOT applied. This is because each model has different cell
+    types in its decision matrix, making it complex to combine them for z-score
+    computation. In this case, raw confidence values are used instead.
+
+    This limitation does NOT affect:
+    - Single custom model: ``annotate_celltypist(custom_model_path="model.pkl")``
+    - ``train_and_annotate()`` pipeline (always uses single custom model)
+
+    Future versions will compute z-score during the ensemble loop using each
+    winning model's probability row.
 
     Examples
     --------
@@ -422,7 +424,7 @@ def annotate_celltypist(
         )
 
     # Validate and prepare data for CellTypist
-    adata_for_prediction = _validate_celltypist_input(adata, norm_layer=norm_layer)
+    adata_for_prediction = _prepare_for_celltypist(adata, copy=True)
 
     # Subset to overlapping genes
     genes_mask = adata_for_prediction.var_names.isin(all_overlap_genes)
@@ -433,6 +435,14 @@ def annotate_celltypist(
     cluster_col = over_clustering or (
         "leiden" if "leiden" in adata.obs.columns else None
     )
+
+    if majority_voting:
+        if cluster_col is None or cluster_col not in adata.obs.columns:
+            raise ValueError(
+                "majority_voting=True requires a valid cluster column. "
+                "Provide over_clustering or add a cluster column (e.g., 'leiden') "
+                f"to adata.obs. Available columns: {list(adata.obs.columns)}"
+            )
 
     # Copy cluster info to subset if using voting
     if majority_voting and cluster_col and cluster_col in adata.obs.columns:
@@ -520,14 +530,14 @@ def annotate_celltypist(
     # Store decision scores if requested (uses last model's prediction for now)
     # In ensemble mode, only stores the winning model's scores
     if store_decision_scores:
-        # For ensemble, we'd need to combine scores - for now, store best model's scores
-        # Get the last prediction result for decision matrix access
-        model_name = list(loaded_models.keys())[0]  # Use first model for scores
-        loaded_model = loaded_models[model_name]
-
-        # Re-run prediction to get decision matrix (this is a limitation for ensemble)
-        # Future: Store during prediction loop
         if len(loaded_models) == 1:
+            # For ensemble, we'd need to combine scores - for now, store best model's scores
+            # Get the last prediction result for decision matrix access
+            model_name = list(loaded_models.keys())[0]  # Use first model for scores
+            loaded_model = loaded_models[model_name]
+
+            # Re-run prediction to get decision matrix (this is a limitation for ensemble)
+            # Future: Store during prediction loop
             prediction_for_scores = celltypist.annotate(
                 adata_subset,
                 model=loaded_model,
@@ -540,7 +550,12 @@ def annotate_celltypist(
                 key_added="cell_type",
             )
             logger.info(
-                f"Stored decision scores in adata.obsm['cell_type_decision_scores']"
+                "Stored decision scores in adata.obsm['cell_type_decision_scores']"
+            )
+        else:
+            logger.warning(
+                "store_decision_scores=True requested, but decision scores are not "
+                "stored in ensemble mode (multiple models)."
             )
 
     # Apply confidence transformation if requested
@@ -554,7 +569,13 @@ def annotate_celltypist(
             f"(mean={transformed_conf.mean():.3f})"
         )
     else:
-        # Use raw confidence if no transform available
+        if confidence_transform is not None and "cell_type_decision_scores" not in adata.obsm:
+            logger.warning(
+                "Confidence transform requested, but decision scores are missing. "
+                "Using raw confidence values instead."
+            )
+        # Use raw confidence if no transform available (ensemble mode limitation)
+        # TODO: Compute z-score during ensemble loop using winning model's probability row
         adata.obs["cell_type_confidence"] = per_cell_confidence
 
     # Log summary

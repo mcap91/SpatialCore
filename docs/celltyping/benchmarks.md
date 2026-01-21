@@ -5,7 +5,7 @@ This benchmark compares two cell typing approaches on spatial transcriptomics da
 | Aspect | Standard CellTypist | SpatialCore Pipeline |
 |--------|---------------------|----------------------|
 | Model type | Pre-trained (Immune_All, etc.) | Custom (panel-specific) |
-| Gene overlap | ~5–9% on 400-gene panels | **100%** |
+| Gene overlap | ~5-9% on 400-gene panels | **100%** |
 | Confidence metric | Raw sigmoid probability | **Z-score transformed** |
 | Threshold meaning | "Model >50% likely" | "Above average for this dataset" |
 | Ontology mapping | Model-dependent labels | **Cell Ontology (CL) IDs** |
@@ -111,7 +111,7 @@ With only 7% gene overlap, the model cannot make confident predictions. The miss
 
 ## Step 3: The SpatialCore Solution
 
-SpatialCore solves both problems—gene overlap and reference bias—in a single API call. The `train_and_annotate()` function trains a custom CellTypist model on your exact panel genes, then applies it with z-score confidence normalization.
+SpatialCore solves both problems - gene overlap and reference bias - in a single API call. The `train_and_annotate()` function trains a custom CellTypist model on your exact panel genes, then applies it with z-score confidence normalization.
 
 **The Full Pipeline:**
 
@@ -130,6 +130,7 @@ reference_paths = [ds.path for ds in datasets]
 adata = train_and_annotate(
     adata,
     references=reference_paths,
+    label_columns=["cell_type"] * len(reference_paths),
     tissue="lung",
     balance_strategy="proportional",
     max_cells_per_type=10000,
@@ -215,7 +216,7 @@ We evaluated both methods across seven metrics measuring annotation quality. All
 
 ![Gene Overlap Comparison](images/gene_overlap_comparison.png)
 
-**Unassigned Rate:** The practical consequence of low gene overlap is a high unassigned rate. Standalone CellTypist marks 98% of cells as unassigned (below 0.5 confidence). SpatialCore, with full gene overlap and z-score normalization, marks only 0.5% as unassigned—even with a stricter 0.8 threshold.
+**Unassigned Rate:** The practical consequence of low gene overlap is a high unassigned rate. Standalone CellTypist marks 98% of cells as unassigned (below 0.5 confidence). SpatialCore, with full gene overlap and z-score normalization, marks only 0.5% as unassigned - even with a stricter 0.8 threshold.
 
 ![Unknown Cell Rates](images/unknown_celltype_calls.png)
 
@@ -238,6 +239,8 @@ We evaluated both methods across seven metrics measuring annotation quality. All
 
 ## Validation Plots
 
+We use SpatialCore's `generate_annotation_plots()` to render the same validation suite for both outputs, enabling direct visual comparison.
+
 Both methods generate the same validation plot suite, enabling direct visual comparison.
 
 **SpatialCore:**
@@ -256,7 +259,7 @@ Both methods generate the same validation plot suite, enabling direct visual com
 
 ## Conclusion
 
-The gene overlap problem is the primary barrier to applying pre-trained classifiers on spatial data. When 93% of a model's learned features are absent, predictions become unreliable—as demonstrated by the 98% unassigned rate with standalone CellTypist.
+The gene overlap problem is the primary barrier to applying pre-trained classifiers on spatial data. When 93% of a model's learned features are absent, predictions become unreliable - as demonstrated by the 98% unassigned rate with standalone CellTypist.
 
 SpatialCore addresses this through three complementary innovations: CellxGene integration for acquiring tissue-matched references, source-aware balancing for fair cell type representation, and panel-specific training for 100% gene overlap. Together, these reduce the unassigned rate to 0.5% while improving biological coherence across all validation metrics.
 

@@ -41,6 +41,7 @@ BIOMART_QUERY_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 def download_ensembl_mapping(
     output_path: Union[str, Path],
     force: bool = False,
+    timeout: float = 30.0,
 ) -> Path:
     """
     Download Ensembl-to-HUGO gene mapping from BioMart.
@@ -53,6 +54,8 @@ def download_ensembl_mapping(
         Path to save the mapping TSV file.
     force : bool, default False
         If True, re-download even if file exists.
+    timeout : float, default 30.0
+        Timeout in seconds for the BioMart download request.
 
     Returns
     -------
@@ -71,8 +74,11 @@ def download_ensembl_mapping(
     >>> from spatialcore.core.utils import download_ensembl_mapping
     >>> path = download_ensembl_mapping("./cache/ensembl_to_hugo.tsv")
     """
+    import shutil
+    import socket
     import urllib.request
     import urllib.parse
+    import urllib.error
 
     output_path = Path(output_path)
 
@@ -89,7 +95,8 @@ def download_ensembl_mapping(
     url = f"{BIOMART_URL}?query={query}"
 
     try:
-        urllib.request.urlretrieve(url, output_path)
+        with urllib.request.urlopen(url, timeout=timeout) as response, open(output_path, "wb") as f:
+            shutil.copyfileobj(response, f)
 
         # Verify the download
         df = pd.read_csv(output_path, sep="\t")
@@ -98,6 +105,9 @@ def download_ensembl_mapping(
 
         return output_path
 
+    except (urllib.error.URLError, socket.timeout, TimeoutError) as e:
+        logger.error(f"Failed to download from BioMart (timeout={timeout}s): {e}")
+        raise
     except Exception as e:
         logger.error(f"Failed to download from BioMart: {e}")
         raise
@@ -309,6 +319,11 @@ def normalize_gene_names(
             logger.info(
                 f"Converted {stats['converted_ensembl']:,} remaining Ensembl IDs to HUGO"
             )
+        if stats["unmapped_ensembl"] > 0:
+            logger.warning(
+                f"{stats['unmapped_ensembl']:,} Ensembl IDs not found in mapping; "
+                "leaving them unchanged"
+            )
         return adata
 
     # Step 1: Use feature_name column if available
@@ -326,12 +341,17 @@ def normalize_gene_names(
     )
     adata.var_names = pd.Index(converted_names)
 
-    if stats["converted_ensembl"] > 0:
+    if stats["converted_ensembl"] > 0 or stats["unmapped_ensembl"] > 0:
         logger.info(
             f"Gene mapping: {stats['converted_ensembl']:,} converted, "
             f"{stats['already_hugo']:,} already HUGO, "
             f"{stats['unmapped_ensembl']:,} unmapped"
         )
+        if stats["unmapped_ensembl"] > 0:
+            logger.warning(
+                f"{stats['unmapped_ensembl']:,} Ensembl IDs not found in mapping; "
+                "leaving them unchanged"
+            )
     else:
         logger.info(f"All {stats['already_hugo']:,} genes already HUGO symbols")
 
@@ -704,6 +724,10 @@ def check_normalization_status(
 
     # Step 2: Analyze adata.X
     sample_data = _get_matrix_sample(adata.X, sample_size)
+
+    # Empty data should fail explicitly
+    if sample_data.size == 0:
+        raise ValueError("Cannot check normalization status of empty AnnData (0 cells or 0 genes)")
 
     mean_val = float(np.mean(sample_data))
     max_val = float(np.max(sample_data))

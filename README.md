@@ -40,6 +40,15 @@ pip install spatialcore
 This installs all core Python dependencies including CellTypist for custom model training for cell type annotation.
 
 
+Run upgrade to get the latest modules, features, and fixes
+```bash
+# Activate environment
+mamba activate spatialcore
+
+# Upgrade
+pip install --upgrade spatialcore
+```
+
 ### R Requirements
 
 SpatialCore uses R for certain operations that are statistically optimized or perform better in R. The `r_bridge` module handles R integration via subprocess (no rpy2 required).
@@ -86,17 +95,10 @@ spatialcore.print_info()
 # SpatialCore v0.1.3
 # Available modules: core, annotation
 
-# Cell type annotation with CellTypist
-from spatialcore.annotation import annotate_celltypist, train_celltypist_model
-
-# Annotate cells using CellTypist (auto-selects models based on tissue)
-adata = annotate_celltypist(adata, tissue="colon")
-
-# Train a custom model on your reference data
-model = train_celltypist_model(adata_reference, label_column="cell_type")
 ```
 
-📖 **Full documentation:** [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
+📖 **See the full documentation:** for modules, examples, and benchmarks [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
+
 
 ---
 

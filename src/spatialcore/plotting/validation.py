@@ -265,7 +265,28 @@ def plot_2d_validation(
             types_to_plot.append((ct, available))
 
     if not types_to_plot:
-        raise ValueError("No cell types with sufficient markers found.")
+        logger.warning("No cell types with sufficient markers found for 2D validation.")
+        fig, ax = setup_figure(figsize=figsize_per_panel)
+        ax.axis("off")
+        ax.text(
+            0.5, 0.5,
+            "No cell types with sufficient markers",
+            ha="center", va="center",
+        )
+        if save:
+            save_figure(fig, save)
+        summary_df = pd.DataFrame(columns=[
+            "cell_type",
+            "n_cells",
+            "n_low_conf",
+            "n_high_conf",
+            "n_validated",
+            "pct_validated",
+            "pct_high_conf",
+            "marker_threshold",
+            "n_markers",
+        ])
+        return fig, summary_df
 
     # Pre-compute GMM results for all cell types to know which will succeed
     successful_types = []
@@ -292,25 +313,47 @@ def plot_2d_validation(
                 plot=False,
                 copy=True,
             )
-            metagene_scores = subset_result.obs["threshold_score"].values
-            marker_threshold = subset_result.uns.get(
-                "threshold_params", {}
-            ).get("threshold", np.median(metagene_scores))
-
-            successful_types.append({
-                "cell_type": cell_type,
-                "markers": ct_markers,
-                "subset": subset,
-                "confidence": confidence,
-                "metagene_scores": metagene_scores,
-                "marker_threshold": marker_threshold,
-            })
         except Exception as e:
             logger.warning(f"Skipping {cell_type}: GMM failed - {e}")
             continue
 
+        metagene_scores = subset_result.obs["threshold_score"].values
+        marker_threshold = subset_result.uns.get(
+            "threshold_params", {}
+        ).get("threshold", np.median(metagene_scores))
+
+        successful_types.append({
+            "cell_type": cell_type,
+            "markers": ct_markers,
+            "subset": subset,
+            "confidence": confidence,
+            "metagene_scores": metagene_scores,
+            "marker_threshold": marker_threshold,
+        })
+
     if not successful_types:
-        raise ValueError("GMM failed for all cell types.")
+        logger.warning("No cell types passed GMM validation for 2D plot.")
+        fig, ax = setup_figure(figsize=figsize_per_panel)
+        ax.axis("off")
+        ax.text(
+            0.5, 0.5,
+            "No cell types passed GMM validation",
+            ha="center", va="center",
+        )
+        if save:
+            save_figure(fig, save)
+        summary_df = pd.DataFrame(columns=[
+            "cell_type",
+            "n_cells",
+            "n_low_conf",
+            "n_high_conf",
+            "n_validated",
+            "pct_validated",
+            "pct_high_conf",
+            "marker_threshold",
+            "n_markers",
+        ])
+        return fig, summary_df
 
     # Create grid with only successful cell types
     n_types = len(successful_types)
@@ -998,11 +1041,18 @@ def plot_ontology_mapping(
         # Build from adata columns
         for col in [source_label_column, ontology_name_column, ontology_id_column]:
             if col not in adata.obs.columns:
-                raise ValueError(f"Column '{col}' not found in adata.obs")
+                raise ValueError(
+                    f"Column '{col}' not found in adata.obs. "
+                    f"Available columns: {list(adata.obs.columns)}"
+                )
 
         # Check for tier and score columns (derived from ontology_id_column)
-        tier_column = ontology_id_column.replace("_id", "_tier")
-        score_column = ontology_id_column.replace("_id", "_score")
+        if ontology_id_column.endswith("_term_id"):
+            tier_column = ontology_id_column.replace("_term_id", "_tier")
+            score_column = ontology_id_column.replace("_term_id", "_score")
+        else:
+            tier_column = ontology_id_column.replace("_id", "_tier")
+            score_column = ontology_id_column.replace("_id", "_score")
         has_tier_column = tier_column in adata.obs.columns
         has_score_column = score_column in adata.obs.columns
 
@@ -1282,20 +1332,17 @@ def generate_annotation_plots(
     # 0. Ontology Mapping Table
     logger.info("Generating ontology mapping table...")
     if source_label_column and ontology_name_column and ontology_id_column:
-        try:
-            path_ontology = output_dir / f"{prefix}_ontology_mapping.png" if output_dir else None
-            fig_ontology = plot_ontology_mapping(
-                adata,
-                source_label_column=source_label_column,
-                ontology_name_column=ontology_name_column,
-                ontology_id_column=ontology_id_column,
-                save=path_ontology,
-            )
-            results["figures"]["ontology_mapping"] = fig_ontology
-            results["paths"]["ontology_mapping"] = path_ontology
-            logger.info("  Ontology mapping table generated")
-        except Exception as e:
-            logger.warning(f"Ontology mapping table failed: {e}")
+        path_ontology = output_dir / f"{prefix}_ontology_mapping.png" if output_dir else None
+        fig_ontology = plot_ontology_mapping(
+            adata,
+            source_label_column=source_label_column,
+            ontology_name_column=ontology_name_column,
+            ontology_id_column=ontology_id_column,
+            save=path_ontology,
+        )
+        results["figures"]["ontology_mapping"] = fig_ontology
+        results["paths"]["ontology_mapping"] = path_ontology
+        logger.info("  Ontology mapping table generated")
     else:
         logger.info(f"  Skipping ontology table - columns not found")
         logger.info(f"    source_label_column: {source_label_column}")
@@ -1304,57 +1351,57 @@ def generate_annotation_plots(
 
     # 1. 2D Marker Validation (GMM-3)
     logger.info("Generating 2D marker validation plot...")
-    try:
-        path_2d = output_dir / f"{prefix}_2d_validation.png" if output_dir else None
-        fig_2d, summary = plot_2d_validation(
-            adata,
-            label_column=label_column,
-            confidence_column=confidence_column,
-            markers=markers,
-            confidence_threshold=confidence_threshold,
-            n_components=3,  # GMM-3 per spec
-            save=path_2d,
-        )
-        results["figures"]["2d_validation"] = fig_2d
-        results["summary"] = summary
-        results["paths"]["2d_validation"] = path_2d
-        logger.info(f"  2D validation: {len(summary)} cell types analyzed")
-    except Exception as e:
-        logger.warning(f"2D validation plot failed: {e}")
+    path_2d = output_dir / f"{prefix}_2d_validation.png" if output_dir else None
+    fig_2d, summary = plot_2d_validation(
+        adata,
+        label_column=label_column,
+        confidence_column=confidence_column,
+        markers=markers,
+        confidence_threshold=confidence_threshold,
+        n_components=3,  # GMM-3 per spec
+        save=path_2d,
+    )
+    results["figures"]["2d_validation"] = fig_2d
+    results["summary"] = summary
+    results["paths"]["2d_validation"] = path_2d
+    logger.info(f"  2D validation: {len(summary)} cell types analyzed")
 
     # 2. Cell Type Confidence
     logger.info("Generating confidence plot...")
-    try:
-        path_conf = output_dir / f"{prefix}_confidence.png" if output_dir else None
-        fig_conf = plot_celltype_confidence(
-            adata,
-            label_column=label_column,
-            confidence_column=confidence_column,
-            spatial_key=spatial_key,
-            threshold=confidence_threshold,
-            save=path_conf,
-        )
-        results["figures"]["confidence"] = fig_conf
-        results["paths"]["confidence"] = path_conf
-        logger.info("  Confidence plot generated")
-    except Exception as e:
-        logger.warning(f"Confidence plot failed: {e}")
+    path_conf = output_dir / f"{prefix}_confidence.png" if output_dir else None
+    fig_conf = plot_celltype_confidence(
+        adata,
+        label_column=label_column,
+        confidence_column=confidence_column,
+        spatial_key=spatial_key,
+        threshold=confidence_threshold,
+        save=path_conf,
+    )
+    results["figures"]["confidence"] = fig_conf
+    results["paths"]["confidence"] = path_conf
+    logger.info("  Confidence plot generated")
 
     # 3. DEG Heatmap
     logger.info("Generating DEG heatmap...")
+    path_deg = output_dir / f"{prefix}_deg_heatmap.png" if output_dir else None
     try:
-        path_deg = output_dir / f"{prefix}_deg_heatmap.png" if output_dir else None
         fig_deg = plot_deg_heatmap(
             adata,
             label_column=label_column,
             n_genes=n_deg_genes,
             save=path_deg,
         )
-        results["figures"]["deg_heatmap"] = fig_deg
-        results["paths"]["deg_heatmap"] = path_deg
+    except ValueError as exc:
+        if "Need at least 2 cell types" in str(exc):
+            logger.warning("Skipping DEG heatmap: %s", exc)
+            fig_deg = None
+            path_deg = None
+        else:
+            raise
+    results["figures"]["deg_heatmap"] = fig_deg
+    results["paths"]["deg_heatmap"] = path_deg
+    if fig_deg is not None:
         logger.info("  DEG heatmap generated")
-    except Exception as e:
-        logger.warning(f"DEG heatmap failed: {e}")
 
     if output_dir:
         logger.info(f"Annotation plots saved to: {output_dir}")
