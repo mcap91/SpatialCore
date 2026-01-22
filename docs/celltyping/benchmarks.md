@@ -145,8 +145,8 @@ adata = train_and_annotate(
 # Check results
 print(f"Cell types: {adata.obs['cell_type'].nunique()}")
 print(f"Mean confidence: {adata.obs['cell_type_confidence'].mean():.3f}")
-print(f"Unassigned: {(adata.obs['cell_type'] == 'Unassigned').mean():.1%}")
-# Output: Unassigned: 0.5%
+print(f"Unassigned: {(adata.obs['cell_type'] == 'Unassigned').mean():.2%}")
+# Output: Unassigned: 0.03%
 ```
 
 **What `train_and_annotate()` Does:**
@@ -201,14 +201,17 @@ We evaluated both methods across seven metrics measuring annotation quality. All
 | Metric | Standalone | SpatialCore | Improvement |
 |--------|-----------|-------------|-------------|
 | Gene Overlap (%) | 7.1% | 100% | 14x |
-| Unknown Cells (%) | 98.0% | 0.5% | 196x |
-| Marker CV | 1.77 | 1.43 | 19% lower |
-| Marker log2FC | 1.50 | 1.95 | 30% higher |
-| DEG log2FC | 3.93 | 4.04 | 3% higher |
-| Marker Purity (%) | 39.0% | 46.3% | 19% higher |
-| Contamination | 0.85 | 0.72 | 15% lower |
+| Unknown Cells (%) | 98.0% | 0.03% | 3,800x |
+| Marker CV | 1.77 | 1.23 | 30% lower |
+| Marker log2FC | 1.50 | 2.17 | 45% higher |
+| DEG log2FC | 3.93 | 4.96 | 26% higher |
+| Marker Purity (%) | 39.0% | 51.7% | 33% higher |
+| Contamination | 0.85 | 0.86 | ~equal |
 
-**SpatialCore wins on all 7 metrics.**
+**SpatialCore wins on 6 of 7 metrics**, with contamination approximately equal.
+
+!!! note "T Cell Subtype Collapsing"
+    SpatialCore collapses granular T cell subtypes (e.g., "effector memory CD8-positive, alpha-beta T cell", "central memory CD4-positive, alpha-beta T cell") into their parent categories ("CD8-positive, alpha-beta T cell", "CD4-positive, alpha-beta T cell"). This is intentional: spatial transcriptomics panels typically lack the transcriptional resolution to discriminate between memory, effector, and naive T cell states. Collapsing these subtypes improves marker consistency (CV, purity) at the cost of slightly higher cross-type contamination, as related T cell populations now share canonical markers. For applications requiring granular T cell subtyping, consider targeted panels with T cell-specific markers or orthogonal validation (e.g., protein markers via immunofluorescence).
 
 ![Benchmark Summary](images/benchmark_summary_table.png)
 
@@ -216,7 +219,7 @@ We evaluated both methods across seven metrics measuring annotation quality. All
 
 ![Gene Overlap Comparison](images/gene_overlap_comparison.png)
 
-**Unassigned Rate:** The practical consequence of low gene overlap is a high unassigned rate. Standalone CellTypist marks 98% of cells as unassigned (below 0.5 confidence). SpatialCore, with full gene overlap and z-score normalization, marks only 0.5% as unassigned - even with a stricter 0.8 threshold.
+**Unassigned Rate:** The practical consequence of low gene overlap is a high unassigned rate. Standalone CellTypist marks 98% of cells as unassigned (below 0.5 confidence). SpatialCore, with full gene overlap and z-score normalization, marks only 0.03% as unassigned - even with a stricter 0.8 threshold.
 
 ![Unknown Cell Rates](images/unknown_celltype_calls.png)
 
@@ -261,7 +264,7 @@ Both methods generate the same validation plot suite, enabling direct visual com
 
 The gene overlap problem is the primary barrier to applying pre-trained classifiers on spatial data. When 93% of a model's learned features are absent, predictions become unreliable - as demonstrated by the 98% unassigned rate with standalone CellTypist.
 
-SpatialCore addresses this through three complementary innovations: CellxGene integration for acquiring tissue-matched references, source-aware balancing for fair cell type representation, and panel-specific training for 100% gene overlap. Together, these reduce the unassigned rate to 0.5% while improving biological coherence across all validation metrics.
+SpatialCore addresses this through three complementary innovations: CellxGene integration for acquiring tissue-matched references, source-aware balancing for fair cell type representation, and panel-specific training for 100% gene overlap. Together, these reduce the unassigned rate to 0.03% while improving biological coherence across validation metrics.
 
 For spatial transcriptomics cell typing, custom models trained on panel genes outperform pre-trained alternatives.
 

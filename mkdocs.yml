@@ -49,6 +49,10 @@ nav:
     - "Benchmarks": celltyping/benchmarks.md
     - "Pipeline & API": celltyping/api.md
     - "Validation & Rationale": celltyping/validation.md
+  - Neighborhoods & Domains:
+    - "Overview": domains/index.md
+    - "Neighborhood Analysis": domains/neighborhood_analysis.md
+    - "Spatial Domains": domains/domain_detection.md
 
 # Plugins
 plugins:

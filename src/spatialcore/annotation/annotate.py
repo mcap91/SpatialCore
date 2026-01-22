@@ -445,16 +445,7 @@ def annotate_celltypist(
             "Consider training a custom model for your panel genes."
         )
 
-    # Validate and prepare data for CellTypist (avoid full-data copy)
-    status = check_normalization_status(adata)
-
-    # Subset to overlapping genes (copy only the needed genes)
-    genes_mask = adata.var_names.isin(all_overlap_genes)
-    adata_subset = adata[:, genes_mask].copy()
-    adata_subset = _prepare_for_celltypist(adata_subset, copy=False, status=status)
-    logger.info(f"Predicting on {adata_subset.n_obs:,} cells × {adata_subset.n_vars:,} genes")
-
-    # Determine cluster column for voting
+    # Determine cluster column for voting (validate early before gene subsetting)
     cluster_col = over_clustering or (
         "leiden" if "leiden" in adata.obs.columns else None
     )
@@ -466,6 +457,64 @@ def annotate_celltypist(
                 "Provide over_clustering or add a cluster column (e.g., 'leiden') "
                 f"to adata.obs. Available columns: {list(adata.obs.columns)}"
             )
+
+    # Validate and prepare data for CellTypist (avoid full-data copy)
+    status = check_normalization_status(adata)
+
+    # Subset to overlapping genes (copy only the needed genes)
+    genes_mask = adata.var_names.isin(all_overlap_genes)
+    adata_subset = adata[:, genes_mask].copy()
+
+    # If gene set changed, re-normalize after subsetting to match training basis
+    if adata_subset.n_vars != adata.n_vars:
+        subset_status = check_normalization_status(adata_subset)
+        if subset_status["raw_source"] is not None:
+            from spatialcore.annotation.loading import _copy_raw_to_x
+
+            logger.info(
+                f"Re-normalizing after gene subset ({adata_subset.n_vars}/{adata.n_vars} genes) "
+                f"using raw counts ({subset_status['raw_source']})."
+            )
+            if (
+                subset_status["raw_source"] == "raw.X"
+                and adata_subset.raw is not None
+                and adata_subset.raw.n_vars != adata_subset.n_vars
+            ):
+                adata_subset.X = adata_subset.raw[:, adata_subset.var_names].X.copy()
+            else:
+                _copy_raw_to_x(adata_subset, subset_status["raw_source"])
+            sc.pp.normalize_total(
+                adata_subset, target_sum=1e4, exclude_highly_expressed=False
+            )
+            sc.pp.log1p(adata_subset)
+            status = None
+        elif subset_status["x_state"] == "log1p_10k":
+            logger.info(
+                f"Re-normalizing after gene subset ({adata_subset.n_vars}/{adata.n_vars} genes) "
+                "from log1p(10k) data."
+            )
+            from scipy.sparse import issparse
+
+            if issparse(adata_subset.X):
+                adata_subset.X = adata_subset.X.copy()
+                adata_subset.X.data = np.expm1(adata_subset.X.data)
+            else:
+                adata_subset.X = np.expm1(adata_subset.X)
+            sc.pp.normalize_total(
+                adata_subset, target_sum=1e4, exclude_highly_expressed=False
+            )
+            sc.pp.log1p(adata_subset)
+            status = None
+        else:
+            raise ValueError(
+                "Gene subset requires re-normalization after subsetting, but no raw "
+                "counts or log1p(10k) data are available. Provide raw counts in "
+                "adata.layers['counts'] or adata.raw.X, or ensure adata.X is "
+                "log1p(10k) before annotation."
+            )
+
+    adata_subset = _prepare_for_celltypist(adata_subset, copy=False, status=status)
+    logger.info(f"Predicting on {adata_subset.n_obs:,} cells × {adata_subset.n_vars:,} genes")
 
     # Copy cluster info to subset if using voting
     if majority_voting and cluster_col and cluster_col in adata.obs.columns:

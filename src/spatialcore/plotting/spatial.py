@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.colors import Normalize
+from matplotlib.collections import LineCollection
 import matplotlib.cm as cm
 import anndata as ad
 
@@ -501,5 +503,285 @@ def plot_spatial_multi_gene(
 
     if dark_background:
         plt.style.use("default")
+
+    return fig
+
+
+def plot_domain_distances(
+    adata: ad.AnnData,
+    source_domain_column: str,
+    target_domain_column: Optional[str] = None,
+    spatial_key: str = "spatial",
+    distance_key: str = "domain_distances",
+    top_n_connections: int = 1,
+    line_cmap: str = "coolwarm_r",
+    line_width: float = 2.0,
+    point_size: float = 0.5,
+    point_alpha: float = 0.3,
+    domain_point_size: float = 3.0,
+    domain_point_alpha: float = 0.7,
+    figsize: Tuple[float, float] = (14, 12),
+    title: Optional[str] = None,
+    save: Optional[Union[str, Path]] = None,
+) -> Figure:
+    """
+    Plot spatial domains with lines showing inter-domain distances.
+
+    Shows all cells (non-domain cells in grey), with domain cells colored.
+    Draws lines between domain centroids colored by distance.
+    Works with any distance metric (minimum, centroid, mean).
+
+    Parameters
+    ----------
+    adata
+        AnnData with spatial coordinates and domain distances computed.
+    source_domain_column
+        Column in adata.obs containing source domain labels.
+    target_domain_column
+        Column in adata.obs containing target domain labels.
+        If None, uses source_domain_column (intra-domain distances).
+    spatial_key
+        Key in adata.obsm for spatial coordinates.
+    distance_key
+        Key in adata.uns containing distance matrix from calculate_domain_distances().
+    top_n_connections
+        Number of closest connections to show per domain. Default 1 shows only
+        the nearest neighbor for each domain. Set to 0 or None to show all.
+    line_cmap
+        Colormap for distance lines (default coolwarm_r: blue=close, red=far).
+    line_width
+        Width of distance lines.
+    point_size
+        Size of background (non-domain) cell scatter points.
+    point_alpha
+        Transparency of background cell scatter points.
+    domain_point_size
+        Size of domain cell scatter points.
+    domain_point_alpha
+        Transparency of domain cell scatter points.
+    figsize
+        Figure size.
+    title
+        Plot title.
+    save
+        Path to save figure.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
+
+    Raises
+    ------
+    KeyError
+        If distance_key not found in adata.uns.
+    ValueError
+        If domain columns not found in adata.obs.
+
+    Examples
+    --------
+    >>> from spatialcore.plotting import plot_domain_distances
+    >>> fig = plot_domain_distances(
+    ...     adata,
+    ...     source_domain_column="bcell_domain",
+    ...     top_n_connections=1,  # Show only nearest neighbor per domain
+    ... )
+    """
+    if target_domain_column is None:
+        target_domain_column = source_domain_column
+
+    if spatial_key not in adata.obsm:
+        raise ValueError(
+            f"Spatial key '{spatial_key}' not found in adata.obsm. "
+            f"Available: {list(adata.obsm.keys())}"
+        )
+
+    if source_domain_column not in adata.obs.columns:
+        raise ValueError(
+            f"Source domain column '{source_domain_column}' not found in adata.obs."
+        )
+
+    if target_domain_column not in adata.obs.columns:
+        raise ValueError(
+            f"Target domain column '{target_domain_column}' not found in adata.obs."
+        )
+
+    if distance_key not in adata.uns:
+        raise KeyError(
+            f"Distance key '{distance_key}' not found in adata.uns. "
+            "Run calculate_domain_distances() first."
+        )
+
+    dist_data = adata.uns[distance_key]
+    if "distance_matrix" not in dist_data:
+        raise KeyError(f"'distance_matrix' not found in adata.uns['{distance_key}'].")
+
+    distance_matrix = pd.DataFrame(dist_data["distance_matrix"]).T
+    coords = adata.obsm[spatial_key]
+
+    # Compute centroids for all domains
+    all_domains = set(distance_matrix.index) | set(distance_matrix.columns)
+    centroids = {}
+
+    for domain in all_domains:
+        mask_src = adata.obs[source_domain_column] == domain
+        mask_tgt = adata.obs[target_domain_column] == domain
+        mask = mask_src | mask_tgt
+
+        if mask.any():
+            centroids[domain] = coords[mask.values].mean(axis=0)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Get domain masks
+    source_mask = adata.obs[source_domain_column].notna()
+    target_mask = adata.obs[target_domain_column].notna()
+    domain_mask = source_mask | target_mask
+    background_mask = ~domain_mask
+
+    # Plot background cells (non-domain) in grey
+    if background_mask.any():
+        ax.scatter(
+            coords[background_mask.values, 0],
+            coords[background_mask.values, 1],
+            c="lightgrey",
+            s=point_size,
+            alpha=point_alpha,
+            rasterized=True,
+            zorder=0,
+        )
+
+    # Get unique domains for coloring
+    source_domains = adata.obs[source_domain_column].dropna().unique()
+    target_domains = adata.obs[target_domain_column].dropna().unique()
+    unique_domains = sorted(set(source_domains) | set(target_domains))
+    n_colors = min(20, len(unique_domains))
+    domain_colors = dict(zip(
+        unique_domains,
+        plt.cm.tab20(np.linspace(0, 1, n_colors))
+    ))
+
+    # Plot domain cells colored by domain
+    for domain in unique_domains:
+        mask = (adata.obs[source_domain_column] == domain) | (
+            adata.obs[target_domain_column] == domain
+        )
+        if mask.any():
+            ax.scatter(
+                coords[mask.values, 0],
+                coords[mask.values, 1],
+                c=[domain_colors[domain]],
+                s=domain_point_size,
+                alpha=domain_point_alpha,
+                rasterized=True,
+                zorder=1,
+            )
+
+    # Collect line segments - filter to top_n closest per domain
+    segments = []
+    distances = []
+    seen_pairs = set()  # Track (src, tgt) pairs to avoid duplicates
+
+    if top_n_connections and top_n_connections > 0:
+        # For each source domain, get top_n closest targets
+        for src in distance_matrix.index:
+            if src not in centroids:
+                continue
+
+            # Get distances from this source to all targets (excluding self)
+            row = distance_matrix.loc[src].drop(src, errors='ignore').dropna()
+            if row.empty:
+                continue
+
+            # Get top_n closest
+            closest = row.nsmallest(top_n_connections)
+
+            for tgt, dist in closest.items():
+                if tgt not in centroids:
+                    continue
+                # Avoid duplicate lines (A->B and B->A)
+                pair_key = tuple(sorted([src, tgt]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                segments.append([centroids[src], centroids[tgt]])
+                distances.append(dist)
+    else:
+        # Show all connections
+        for src in distance_matrix.index:
+            if src not in centroids:
+                continue
+            for tgt in distance_matrix.columns:
+                if tgt not in centroids or src == tgt:
+                    continue
+                if src >= tgt:  # Avoid duplicates
+                    continue
+
+                dist = distance_matrix.loc[src, tgt]
+                if pd.isna(dist):
+                    continue
+
+                segments.append([centroids[src], centroids[tgt]])
+                distances.append(dist)
+
+    if not segments:
+        raise ValueError("No valid distance segments to plot.")
+
+    # Normalize distances for coloring
+    distances = np.array(distances)
+    norm = Normalize(vmin=distances.min(), vmax=distances.max())
+
+    # Create line collection
+    lc = LineCollection(
+        segments,
+        cmap=line_cmap,
+        norm=norm,
+        linewidths=line_width,
+        zorder=2,
+    )
+    lc.set_array(distances)
+    ax.add_collection(lc)
+
+    # Add colorbar
+    cbar = plt.colorbar(lc, ax=ax, shrink=0.6, pad=0.02)
+    cbar.set_label("Distance", fontsize=11)
+
+    # Plot centroids as larger markers with labels
+    for domain, centroid in centroids.items():
+        ax.scatter(
+            centroid[0],
+            centroid[1],
+            c=[domain_colors.get(domain, "#888888")],
+            s=100,
+            edgecolors="white",
+            linewidths=1.5,
+            zorder=3,
+        )
+        ax.annotate(
+            domain.split("_")[-1],
+            (centroid[0], centroid[1]),
+            fontsize=9,
+            fontweight="bold",
+            ha="center",
+            va="center",
+            color="white",
+            zorder=4,
+        )
+
+    ax.set_xlabel("X (pixels)", fontsize=12)
+    ax.set_ylabel("Y (pixels)", fontsize=12)
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+
+    if title is None:
+        metric = dist_data.get("distance_metric", "unknown")
+        title = f"Domain Distances ({metric})"
+    ax.set_title(title, fontsize=14, fontweight="bold")
+
+    plt.tight_layout()
+
+    if save:
+        save_figure(fig, save)
 
     return fig

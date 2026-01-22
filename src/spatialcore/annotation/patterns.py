@@ -30,10 +30,16 @@ CELL_TYPE_PATTERNS = {
     r"mait|mucosal.*invariant": "mucosal invariant t cell",
     r"nkt|natural.*killer.*t|inkt": "invariant natural killer t-cell",
     r"cytotoxic.*t|ctl": "cytotoxic t cell",
-    r"memory.*t.*cd4|cd4.*memory": "cd4-positive, alpha-beta memory t cell",
-    r"memory.*t.*cd8|cd8.*memory": "cd8-positive, alpha-beta memory t cell",
-    r"naive.*t.*cd4|cd4.*naive": "naive thymus-derived cd4-positive, alpha-beta t cell",
-    r"naive.*t.*cd8|cd8.*naive": "naive thymus-derived cd8-positive, alpha-beta t cell",
+    # Collapse granular CD4/CD8 memory subtypes to parent types
+    # These MUST come before generic memory/effector/central patterns
+    r"effector.*memory.*cd8|central.*memory.*cd8|cd8.*effector.*memory|cd8.*central.*memory|tem.*cd8|tcm.*cd8": "cd8-positive, alpha-beta t cell",
+    r"effector.*memory.*cd4|central.*memory.*cd4|cd4.*effector.*memory|cd4.*central.*memory|tem.*cd4|tcm.*cd4": "cd4-positive, alpha-beta t cell",
+    # General memory patterns (only if CD4/CD8 not present)
+    r"memory.*t.*cd4|cd4.*memory": "cd4-positive, alpha-beta t cell",
+    r"memory.*t.*cd8|cd8.*memory": "cd8-positive, alpha-beta t cell",
+    r"naive.*t.*cd4|cd4.*naive": "cd4-positive, alpha-beta t cell",
+    r"naive.*t.*cd8|cd8.*naive": "cd8-positive, alpha-beta t cell",
+    # Generic effector/central memory (no CD4/CD8 specified) - less specific
     r"effector.*memory|\btem\b": "effector memory t cell",
     r"central.*memory|\btcm\b": "central memory t cell",
     r"exhausted.*t": "exhausted t cell",

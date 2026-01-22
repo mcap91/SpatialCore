@@ -581,6 +581,7 @@ def annotate_celltypist(
 
 - If `majority_voting=True`, you must provide `over_clustering` or have a valid cluster column (e.g., `leiden`) in `adata.obs`. Otherwise a ValueError is raised.
 - If `batch_size` is set, `majority_voting` must be False because voting cannot be computed across batches.
+- If gene overlap reduces the feature set, SpatialCore re-normalizes after subsetting to match training. This requires raw counts or log1p(10k) data.
 - `annotate_celltypist()` does not accept a `generate_plots` parameter. Low-level users should call `generate_annotation_plots()` manually after annotation.
 
 ---
@@ -1316,6 +1317,7 @@ Then edit `classifier.py` with the changes above.
 | `Label column not found` | Wrong column name | List columns with `list(adata.obs.columns)` |
 | `majority_voting=True requires a valid cluster column` | Missing or invalid cluster column | Provide `over_clustering` or add a cluster column (e.g., `leiden`) to `adata.obs` |
 | `batch_size requires majority_voting=False` | Majority voting enabled with batching | Set `majority_voting=False` or `batch_size=None` |
+| `Gene subset requires re-normalization after subsetting` | Overlap genes differ and data is not raw or log1p(10k) | Provide raw counts or ensure `adata.X` is log1p(10k) before annotation |
 | `No marker genes found in data` | Canonical markers missing/empty or no marker overlap | Provide a markers dict or ensure marker genes are present |
 | `No ontology match` | Novel cell type names | Review unmapped in `_missed.json` |
 | `ImportError: cellxgene-census` | Missing optional dep | `pip install cellxgene-census` |
