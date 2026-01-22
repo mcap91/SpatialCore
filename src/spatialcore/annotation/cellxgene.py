@@ -15,7 +15,8 @@ References:
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Set
+import re
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,64 @@ from spatialcore.core.utils import (
 )
 
 logger = get_logger(__name__)
+
+_LABEL_TOKEN_PATTERN = re.compile(r"[^a-z0-9]+")
+
+
+def _label_tokens(label: str) -> Set[str]:
+    """Normalize a label into lowercase alphanumeric tokens."""
+    if label is None:
+        return set()
+    normalized = _LABEL_TOKEN_PATTERN.sub(" ", str(label).lower()).strip()
+    if not normalized:
+        return set()
+    return set(token for token in normalized.split() if token)
+
+
+def _detect_parent_child_conflicts(
+    adata: ad.AnnData,
+    label_column: str,
+    ontology_column: str,
+    min_parent_tokens: int = 2,
+) -> Dict[str, List[str]]:
+    """
+    Detect parent/child conflicts based on label token containment.
+
+    Returns dict mapping parent CL IDs to list of child CL IDs present in data.
+    """
+    pairs = adata.obs[[label_column, ontology_column]].dropna()
+    if pairs.empty:
+        return {}
+
+    pairs = pairs.astype(str)
+    valid_mask = pairs[ontology_column].str.startswith("CL:")
+    pairs = pairs.loc[valid_mask, [label_column, ontology_column]]
+    if pairs.empty:
+        return {}
+
+    # Map CL ID -> most common label for that ID
+    id_to_label = (
+        pairs.groupby(ontology_column)[label_column]
+        .agg(lambda values: values.value_counts().idxmax())
+        .to_dict()
+    )
+    id_to_tokens = {cl_id: _label_tokens(label) for cl_id, label in id_to_label.items()}
+
+    conflicts: Dict[str, List[str]] = {}
+    for parent_id, parent_tokens in id_to_tokens.items():
+        if len(parent_tokens) < min_parent_tokens:
+            continue
+        for child_id, child_tokens in id_to_tokens.items():
+            if parent_id == child_id:
+                continue
+            if parent_tokens == child_tokens:
+                continue
+            if len(child_tokens) <= len(parent_tokens):
+                continue
+            if parent_tokens.issubset(child_tokens):
+                conflicts.setdefault(parent_id, []).append(child_id)
+
+    return conflicts
 
 # ============================================================================
 # CellxGene Dataset Registry
@@ -202,6 +261,7 @@ def query_cellxgene_census(
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
     validate_labels: bool = True,
+    resolve_hierarchy: str = "none",
 ) -> ad.AnnData:
     """
     Query cells from CellxGene Census with flexible filters.
@@ -236,6 +296,10 @@ def query_cellxgene_census(
     validate_labels : bool, default True
         If True, check for label-to-ontology inconsistencies in CellxGene
         columns (cell_type vs cell_type_ontology_term_id) and log warnings.
+    resolve_hierarchy : str, default "none"
+        If "remove_parents", drop cells labeled with parent terms when any
+        child terms are present (based on label token containment). Use "none"
+        to keep current behavior.
 
     Returns
     -------
@@ -358,6 +422,35 @@ def query_cellxgene_census(
             )
 
     logger.info(f"  Downloaded: {adata.n_obs:,} cells × {adata.n_vars:,} genes")
+
+    if resolve_hierarchy not in {"none", "remove_parents"}:
+        raise ValueError("resolve_hierarchy must be 'none' or 'remove_parents'")
+
+    if resolve_hierarchy == "remove_parents":
+        if (
+            "cell_type" not in adata.obs.columns
+            or "cell_type_ontology_term_id" not in adata.obs.columns
+        ):
+            raise ValueError(
+                "resolve_hierarchy='remove_parents' requires "
+                "cell_type and cell_type_ontology_term_id in adata.obs"
+            )
+
+        conflicts = _detect_parent_child_conflicts(
+            adata,
+            label_column="cell_type",
+            ontology_column="cell_type_ontology_term_id",
+        )
+
+        if conflicts:
+            parent_ids = set(conflicts.keys())
+            parent_mask = adata.obs["cell_type_ontology_term_id"].isin(parent_ids)
+            removed = int(parent_mask.sum())
+            adata = adata[~parent_mask].copy()
+            logger.info(
+                "Removed %d parent-labeled cells due to hierarchy conflicts",
+                removed,
+            )
 
     if validate_labels:
         if (

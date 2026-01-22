@@ -343,6 +343,7 @@ def acquire_reference(
         Source-specific options:
 
         - ``max_cells`` (int): Maximum cells to download (for CellxGene query)
+        - ``resolve_hierarchy`` (str): "remove_parents" to drop parent labels
         - ``auth_token`` (str): Synapse authentication token
         - ``tissue``, ``disease``, ``cell_type`` (str): CellxGene query filters
 
@@ -476,6 +477,8 @@ def _acquire_from_cellxgene(source: str, **kwargs) -> ad.AnnData:
             assay=assay,
             max_cells=kwargs.get("max_cells"),
             random_state=kwargs.get("random_state", 42),
+            resolve_hierarchy=kwargs.get("resolve_hierarchy", "none"),
+            validate_labels=kwargs.get("validate_labels", True),
         )
 
     else:
