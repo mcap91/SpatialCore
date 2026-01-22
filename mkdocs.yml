@@ -53,6 +53,8 @@ nav:
     - "Overview": domains/index.md
     - "Neighborhood Analysis": domains/neighborhood_analysis.md
     - "Spatial Domains": domains/domain_detection.md
+  - R Bridge:
+    - "Overview": r_bridge/index.md
 
 # Plugins
 plugins:
