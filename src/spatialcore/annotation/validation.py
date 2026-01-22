@@ -349,6 +349,8 @@ def validate_cell_type_column(
 
         return result
 
+    return result
+
 
 @dataclass
 class LabelOntologyConsistencyResult:
