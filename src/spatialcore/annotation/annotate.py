@@ -14,6 +14,7 @@ References:
 
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union, Any
+from types import SimpleNamespace
 import gc
 
 import numpy as np
@@ -22,6 +23,7 @@ import scanpy as sc
 import anndata as ad
 
 from spatialcore.core.logging import get_logger
+from spatialcore.core.utils import check_normalization_status
 from spatialcore.annotation.confidence import (
     extract_decision_scores,
     transform_confidence,
@@ -185,7 +187,11 @@ def _validate_gene_overlap(
     }
 
 
-def _prepare_for_celltypist(adata: ad.AnnData, copy: bool = True) -> ad.AnnData:
+def _prepare_for_celltypist(
+    adata: ad.AnnData,
+    copy: bool = True,
+    status: Optional[Dict[str, Any]] = None,
+) -> ad.AnnData:
     """
     Prepare AnnData for CellTypist prediction.
 
@@ -198,6 +204,8 @@ def _prepare_for_celltypist(adata: ad.AnnData, copy: bool = True) -> ad.AnnData:
         Input data (raw counts or normalized).
     copy : bool, default True
         Return a copy (CellTypist prediction is destructive).
+    status : dict, optional
+        Normalization status from check_normalization_status() on the full data.
 
     Returns
     -------
@@ -212,11 +220,12 @@ def _prepare_for_celltypist(adata: ad.AnnData, copy: bool = True) -> ad.AnnData:
     from spatialcore.core.utils import check_normalization_status
     from spatialcore.annotation.loading import ensure_normalized
 
-    # Always copy for CellTypist (it modifies X during prediction)
+    # Copy if requested (CellTypist modifies X during prediction)
     adata_ct = adata.copy() if copy else adata
 
-    # Check current state
-    status = check_normalization_status(adata_ct)
+    # Check current state (allow caller to pass full-data status)
+    if status is None:
+        status = check_normalization_status(adata_ct)
     logger.info(f"Input data state: x_state={status['x_state']}, raw_source={status['raw_source']}")
 
     # Use ensure_normalized to handle all cases
@@ -253,6 +262,7 @@ def annotate_celltypist(
     min_confidence: float = 0.5,
     store_decision_scores: bool = True,
     confidence_transform: Optional[ConfidenceMethod] = "zscore",
+    batch_size: Optional[int] = None,
     copy: bool = False,
 ) -> ad.AnnData:
     """
@@ -294,6 +304,9 @@ def annotate_celltypist(
     confidence_transform : {"raw", "zscore", "softmax", "minmax"} or None, default "zscore"
         Transform method for confidence scores. "zscore" is recommended for
         spatial data. Set to None to skip transformation.
+    batch_size : int, optional
+        If provided, run CellTypist prediction in batches of this many cells to
+        reduce peak memory usage. Requires majority_voting=False.
     copy : bool, default False
         If True, return a copy.
 
@@ -363,6 +376,15 @@ def annotate_celltypist(
             "celltypist is required. Install with: pip install celltypist"
         )
 
+    if batch_size is not None:
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer or None.")
+        if majority_voting:
+            raise ValueError(
+                "batch_size requires majority_voting=False because voting "
+                "cannot be computed across batches."
+            )
+
     if copy:
         adata = adata.copy()
 
@@ -423,12 +445,13 @@ def annotate_celltypist(
             "Consider training a custom model for your panel genes."
         )
 
-    # Validate and prepare data for CellTypist
-    adata_for_prediction = _prepare_for_celltypist(adata, copy=True)
+    # Validate and prepare data for CellTypist (avoid full-data copy)
+    status = check_normalization_status(adata)
 
-    # Subset to overlapping genes
-    genes_mask = adata_for_prediction.var_names.isin(all_overlap_genes)
-    adata_subset = adata_for_prediction[:, genes_mask].copy()
+    # Subset to overlapping genes (copy only the needed genes)
+    genes_mask = adata.var_names.isin(all_overlap_genes)
+    adata_subset = adata[:, genes_mask].copy()
+    adata_subset = _prepare_for_celltypist(adata_subset, copy=False, status=status)
     logger.info(f"Predicting on {adata_subset.n_obs:,} cells × {adata_subset.n_vars:,} genes")
 
     # Determine cluster column for voting
@@ -450,26 +473,66 @@ def annotate_celltypist(
 
     # Run predictions for each model
     all_model_predictions = {}
+    decision_matrix_for_scores = None
+    collect_decision_scores = store_decision_scores and len(loaded_models) == 1
 
     for model_name, loaded_model in loaded_models.items():
         logger.info(f"  Running {model_name}...")
 
-        prediction = celltypist.annotate(
-            adata_subset,
-            model=loaded_model,
-            mode="best match",
-            majority_voting=majority_voting,
-            over_clustering=cluster_col if majority_voting else None,
-            min_prop=min_prop,
-        )
+        if batch_size is None or batch_size >= adata_subset.n_obs:
+            prediction = celltypist.annotate(
+                adata_subset,
+                model=loaded_model,
+                mode="best match",
+                majority_voting=majority_voting,
+                over_clustering=cluster_col if majority_voting else None,
+                min_prop=min_prop,
+            )
 
-        # Get labels based on whether voting was enabled
-        if majority_voting and "majority_voting" in prediction.predicted_labels.columns:
-            labels = prediction.predicted_labels["majority_voting"]
+            # Get labels based on whether voting was enabled
+            if majority_voting and "majority_voting" in prediction.predicted_labels.columns:
+                labels = prediction.predicted_labels["majority_voting"]
+            else:
+                labels = prediction.predicted_labels["predicted_labels"]
+
+            confidence = prediction.probability_matrix.max(axis=1).values
+            if collect_decision_scores:
+                decision_matrix_for_scores = prediction.decision_matrix
         else:
-            labels = prediction.predicted_labels["predicted_labels"]
+            n_cells = adata_subset.n_obs
+            total_batches = (n_cells + batch_size - 1) // batch_size
+            logger.info(f"    Batching enabled (batch_size={batch_size}, n_batches={total_batches})")
 
-        confidence = prediction.probability_matrix.max(axis=1).values
+            all_labels = []
+            all_confidences = []
+            all_decision_scores = []
+
+            for start_idx in range(0, n_cells, batch_size):
+                end_idx = min(start_idx + batch_size, n_cells)
+                adata_batch = adata_subset[start_idx:end_idx].copy()
+
+                prediction = celltypist.annotate(
+                    adata_batch,
+                    model=loaded_model,
+                    mode="best match",
+                    majority_voting=False,
+                    over_clustering=None,
+                    min_prop=min_prop,
+                )
+
+                all_labels.append(prediction.predicted_labels["predicted_labels"])
+                all_confidences.append(prediction.probability_matrix.max(axis=1).values)
+                if collect_decision_scores:
+                    all_decision_scores.append(prediction.decision_matrix)
+
+                del adata_batch
+                gc.collect()
+
+            labels = pd.concat(all_labels)
+            confidence = np.concatenate(all_confidences)
+            if collect_decision_scores:
+                decision_matrix_for_scores = pd.concat(all_decision_scores)
+
         all_model_predictions[model_name] = (labels, confidence)
 
     gc.collect()
@@ -531,27 +594,37 @@ def annotate_celltypist(
     # In ensemble mode, only stores the winning model's scores
     if store_decision_scores:
         if len(loaded_models) == 1:
-            # For ensemble, we'd need to combine scores - for now, store best model's scores
-            # Get the last prediction result for decision matrix access
-            model_name = list(loaded_models.keys())[0]  # Use first model for scores
-            loaded_model = loaded_models[model_name]
+            if decision_matrix_for_scores is not None:
+                adata = extract_decision_scores(
+                    adata,
+                    SimpleNamespace(decision_matrix=decision_matrix_for_scores),
+                    key_added="cell_type",
+                )
+                logger.info(
+                    "Stored decision scores in adata.obsm['cell_type_decision_scores']"
+                )
+            else:
+                # For ensemble, we'd need to combine scores - for now, store best model's scores
+                # Get the last prediction result for decision matrix access
+                model_name = list(loaded_models.keys())[0]  # Use first model for scores
+                loaded_model = loaded_models[model_name]
 
-            # Re-run prediction to get decision matrix (this is a limitation for ensemble)
-            # Future: Store during prediction loop
-            prediction_for_scores = celltypist.annotate(
-                adata_subset,
-                model=loaded_model,
-                mode="best match",
-                majority_voting=False,
-            )
-            adata = extract_decision_scores(
-                adata,
-                prediction_for_scores,
-                key_added="cell_type",
-            )
-            logger.info(
-                "Stored decision scores in adata.obsm['cell_type_decision_scores']"
-            )
+                # Re-run prediction to get decision matrix (this is a limitation for ensemble)
+                # Future: Store during prediction loop
+                prediction_for_scores = celltypist.annotate(
+                    adata_subset,
+                    model=loaded_model,
+                    mode="best match",
+                    majority_voting=False,
+                )
+                adata = extract_decision_scores(
+                    adata,
+                    prediction_for_scores,
+                    key_added="cell_type",
+                )
+                logger.info(
+                    "Stored decision scores in adata.obsm['cell_type_decision_scores']"
+                )
         else:
             logger.warning(
                 "store_decision_scores=True requested, but decision scores are not "

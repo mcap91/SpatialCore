@@ -234,6 +234,8 @@ def combine_references(
     logger.info(f"Loaded {len(ensembl_to_hugo):,} gene mappings")
 
     adatas = []
+    reference_names = []
+    normalization_statuses = []
     validation_results = []  # Track validation results for each reference
 
     for i, (ref_path, label_col) in enumerate(zip(reference_paths, label_columns)):
@@ -291,14 +293,11 @@ def combine_references(
         # Normalize gene names (Ensembl → HUGO)
         adata = normalize_gene_names(adata, ensembl_to_hugo)
 
-        # Check/apply normalization
+        # Record normalization status before any gene subsetting
+        status = None
         if normalize_data:
             status = check_normalization_status(adata)
-            if status["x_state"] == "log1p_10k":
-                logger.info("  Data already log-normalized")
-            else:
-                adata = ensure_normalized(adata)
-                logger.info("  Applied log1p(10k) normalization")
+        normalization_statuses.append(status)
 
         # Copy cell type labels to unified column
         if label_col not in adata.obs.columns:
@@ -312,6 +311,7 @@ def combine_references(
         # Add source reference info (use source name from URI or local path)
         adata.obs["reference_source"] = source_name
 
+        reference_names.append(source_name)
         adatas.append(adata)
         gc.collect()
 
@@ -347,6 +347,43 @@ def combine_references(
     shared_genes_sorted = sorted(shared_genes)
     for i in range(len(adatas)):
         adatas[i] = adatas[i][:, shared_genes_sorted].copy()
+
+    # Normalize after final gene subsetting (panel + shared genes)
+    if normalize_data:
+        logger.info("\nNormalizing references after gene subsetting...")
+        for i, adata in enumerate(adatas):
+            status = normalization_statuses[i]
+            source_name = reference_names[i]
+            if status is None:
+                raise ValueError(
+                    f"Missing normalization status for {source_name}. "
+                    "This is an internal error."
+                )
+
+            if status["raw_source"] is not None:
+                if (
+                    status["raw_source"] == "raw.X"
+                    and adata.raw is not None
+                    and not adata.raw.var_names.equals(adata.var_names)
+                ):
+                    adata.raw = adata.raw[:, adata.var_names].copy()
+
+                adata = ensure_normalized(adata, copy=False)
+                logger.info(f"  {source_name}: applied log1p(10k) normalization")
+            else:
+                if status["x_state"] == "log1p_10k":
+                    logger.warning(
+                        f"  {source_name}: no raw counts found; using existing "
+                        "log1p(10k) values after subsetting. Totals may be <10k."
+                    )
+                else:
+                    raise ValueError(
+                        f"Cannot safely normalize {source_name}. "
+                        f"Detected X state: {status['x_state']}. "
+                        "Raw counts not found. Provide raw counts or log1p(10k) data."
+                    )
+
+            adatas[i] = adata
 
     # Memory check before concatenation
     available_gb = get_available_memory_gb()
