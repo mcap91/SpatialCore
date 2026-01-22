@@ -366,7 +366,8 @@ def combine_references(
                     and adata.raw is not None
                     and not adata.raw.var_names.equals(adata.var_names)
                 ):
-                    adata.raw = adata.raw[:, adata.var_names].copy()
+                    raw_adata = adata.raw.to_adata()[:, adata.var_names].copy()
+                    adata.raw = raw_adata
 
                 adata = ensure_normalized(adata, copy=False)
                 logger.info(f"  {source_name}: applied log1p(10k) normalization")
