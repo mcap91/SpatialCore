@@ -364,6 +364,9 @@ def subsample_balanced(
 ) -> AnnData:
 ```
 
+Cell types with fewer than `min_cells_per_type` cells are removed before
+balancing. Set `min_cells_per_type=0` to keep all types.
+
 **The `group_by_column` parameter:**
 
 Different references may use different names for the same cell type:
@@ -441,8 +444,9 @@ balanced = subsample_balanced(
 )
 ```
 
-Targets are resolved against the final balanced output size (after min/max
-constraints), with `min_cells_per_type` as a floor. `target_proportions` entries
+Targets are resolved against the final balanced output size (after filtering
+low-count types and min/max constraints), with `min_cells_per_type` as a floor
+for remaining types. `target_proportions` entries
 must exist in the data and must sum to <= 1.0; if they sum to 1.0, all types
 must be specified.
 

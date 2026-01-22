@@ -1243,8 +1243,8 @@ def subsample_balanced(
     max_cells_per_type : int, default 5000
         Maximum cells per cell type in output.
     min_cells_per_type : int, default 50
-        Cell types with fewer cells than this are kept entirely
-        (no subsampling applied).
+        Minimum cells required to keep a cell type. Types with fewer
+        cells are removed before balancing.
     source_column : str, optional, default "reference_source"
         Column identifying which reference each cell came from.
         Set to None to disable source-aware balancing (simple capping).
@@ -1387,8 +1387,41 @@ def subsample_balanced(
     else:
         cell_types = adata.obs[label_column].astype(str)
 
-    unique_types = cell_types.unique()
     type_counts = cell_types.value_counts()
+    if min_cells_per_type > 0:
+        low_count_types = type_counts[type_counts < min_cells_per_type].index.tolist()
+        if low_count_types:
+            n_removed = int(type_counts[type_counts < min_cells_per_type].sum())
+            logger.info(
+                f"\nFiltering low-count cell types (<{min_cells_per_type} cells) before balancing:"
+            )
+            logger.info(f"  Removing {len(low_count_types)} types, {n_removed:,} cells")
+            for ct in low_count_types[:10]:
+                logger.info(f"    {ct}: {type_counts[ct]} cells")
+            if len(low_count_types) > 10:
+                logger.info(f"    ... and {len(low_count_types) - 10} more types")
+
+            keep_mask = ~cell_types.isin(low_count_types)
+            adata = adata[keep_mask].copy()
+
+            if group_by_column is not None:
+                cell_types = adata.obs[group_by_column].astype(str)
+            else:
+                cell_types = adata.obs[label_column].astype(str)
+
+            if props:
+                dropped = sorted(set(props) & set(low_count_types))
+                if dropped:
+                    for ct in dropped:
+                        props.pop(ct, None)
+                    logger.warning(
+                        "Dropping target_proportions for low-count types: %s",
+                        ", ".join(dropped),
+                    )
+
+            type_counts = cell_types.value_counts()
+
+    unique_types = cell_types.unique()
     target_totals = _resolve_target_totals(
         type_counts=type_counts,
         min_cells_per_type=min_cells_per_type,
