@@ -201,6 +201,7 @@ def query_cellxgene_census(
     max_cells: Optional[int] = None,
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
+    validate_labels: bool = True,
 ) -> ad.AnnData:
     """
     Query cells from CellxGene Census with flexible filters.
@@ -232,6 +233,9 @@ def query_cellxgene_census(
         If provided, save result to this h5ad file.
     random_state : int, default 42
         Random seed for subsampling (only used when max_cells is specified).
+    validate_labels : bool, default True
+        If True, check for label-to-ontology inconsistencies in CellxGene
+        columns (cell_type vs cell_type_ontology_term_id) and log warnings.
 
     Returns
     -------
@@ -354,6 +358,39 @@ def query_cellxgene_census(
             )
 
     logger.info(f"  Downloaded: {adata.n_obs:,} cells × {adata.n_vars:,} genes")
+
+    if validate_labels:
+        if (
+            "cell_type" in adata.obs.columns
+            and "cell_type_ontology_term_id" in adata.obs.columns
+        ):
+            from spatialcore.annotation.validation import (
+                check_label_ontology_consistency,
+            )
+
+            consistency = check_label_ontology_consistency(
+                adata,
+                label_column="cell_type",
+                ontology_column="cell_type_ontology_term_id",
+            )
+
+            if consistency.n_labels_with_multiple_ids > 0:
+                examples = []
+                for label in sorted(consistency.labels_with_multiple_ids.keys())[:5]:
+                    ids = ", ".join(consistency.labels_with_multiple_ids[label])
+                    examples.append(f"{label} -> {ids}")
+                logger.warning(
+                    "CellxGene label/ontology mismatch: %d labels map to multiple CL IDs. "
+                    "Examples: %s",
+                    consistency.n_labels_with_multiple_ids,
+                    "; ".join(examples),
+                )
+
+            if consistency.n_hierarchical_labels > 0:
+                logger.warning(
+                    "CellxGene labels look hierarchical (parent/child in one label): %s",
+                    ", ".join(sorted(consistency.hierarchical_labels)[:5]),
+                )
 
     # Save if output path provided
     if output_path:

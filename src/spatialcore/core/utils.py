@@ -251,6 +251,36 @@ def _convert_ensembl_to_hugo(
     return np.array(converted), stats
 
 
+def _normalize_var_names(
+    var_names: pd.Index,
+    var_df: pd.DataFrame,
+    ensembl_to_hugo: Dict[str, str],
+) -> Tuple[np.ndarray, Dict[str, int], bool, bool]:
+    """
+    Normalize var_names using feature_name and Ensembl -> HUGO mapping.
+
+    Returns converted names, conversion stats, and flags indicating
+    whether non-symbol IDs were detected and feature_name was used.
+    """
+    first_gene = str(var_names[0])
+    uses_non_symbol_ids = (
+        first_gene.isdigit() or
+        first_gene.startswith("ENSG") or
+        first_gene.startswith("ENST")
+    )
+
+    base_names = var_names.values
+    used_feature_name = False
+    if uses_non_symbol_ids and "feature_name" in var_df.columns:
+        base_names = var_df["feature_name"].values.astype(str)
+        used_feature_name = True
+
+    converted_names, stats = _convert_ensembl_to_hugo(
+        np.asarray(base_names), ensembl_to_hugo
+    )
+    return converted_names, stats, uses_non_symbol_ids, used_feature_name
+
+
 def normalize_gene_names(
     adata: ad.AnnData,
     ensembl_to_hugo: Optional[Dict[str, str]] = None,
@@ -278,6 +308,7 @@ def normalize_gene_names(
     -------
     AnnData
         AnnData with normalized gene names in var_names.
+        If adata.raw is present, its var_names are updated to stay aligned.
 
     Notes
     -----
@@ -297,22 +328,15 @@ def normalize_gene_names(
     if copy:
         adata = adata.copy()
 
-    first_gene = str(adata.var_names[0])
-    uses_non_symbol_ids = (
-        first_gene.isdigit() or
-        first_gene.startswith("ENSG") or
-        first_gene.startswith("ENST")
+    if ensembl_to_hugo is None:
+        ensembl_to_hugo = load_ensembl_to_hugo_mapping()
+
+    converted_names, stats, uses_non_symbol_ids, used_feature_name = _normalize_var_names(
+        adata.var_names, adata.var, ensembl_to_hugo
     )
 
     if not uses_non_symbol_ids:
         logger.info("Gene names already appear to be HUGO symbols")
-        # Still check for any remaining Ensembl IDs and convert them
-        if ensembl_to_hugo is None:
-            ensembl_to_hugo = load_ensembl_to_hugo_mapping()
-
-        converted_names, stats = _convert_ensembl_to_hugo(
-            adata.var_names.values, ensembl_to_hugo
-        )
         if stats["converted_ensembl"] > 0:
             adata.var_names = pd.Index(converted_names)
             adata.var_names_make_unique()
@@ -324,38 +348,46 @@ def normalize_gene_names(
                 f"{stats['unmapped_ensembl']:,} Ensembl IDs not found in mapping; "
                 "leaving them unchanged"
             )
-        return adata
-
-    # Step 1: Use feature_name column if available
-    if "feature_name" in adata.var.columns:
-        feature_names = adata.var["feature_name"].values.astype(str)
-        adata.var_names = pd.Index(feature_names)
-        logger.info("Using 'feature_name' column as gene names")
-
-    # Step 2: Apply Ensembl to HUGO mapping for any remaining Ensembl IDs
-    if ensembl_to_hugo is None:
-        ensembl_to_hugo = load_ensembl_to_hugo_mapping()
-
-    converted_names, stats = _convert_ensembl_to_hugo(
-        adata.var_names.values, ensembl_to_hugo
-    )
-    adata.var_names = pd.Index(converted_names)
-
-    if stats["converted_ensembl"] > 0 or stats["unmapped_ensembl"] > 0:
-        logger.info(
-            f"Gene mapping: {stats['converted_ensembl']:,} converted, "
-            f"{stats['already_hugo']:,} already HUGO, "
-            f"{stats['unmapped_ensembl']:,} unmapped"
-        )
-        if stats["unmapped_ensembl"] > 0:
-            logger.warning(
-                f"{stats['unmapped_ensembl']:,} Ensembl IDs not found in mapping; "
-                "leaving them unchanged"
-            )
     else:
-        logger.info(f"All {stats['already_hugo']:,} genes already HUGO symbols")
+        if used_feature_name:
+            logger.info("Using 'feature_name' column as gene names")
 
-    adata.var_names_make_unique()
+        adata.var_names = pd.Index(converted_names)
+
+        if stats["converted_ensembl"] > 0 or stats["unmapped_ensembl"] > 0:
+            logger.info(
+                f"Gene mapping: {stats['converted_ensembl']:,} converted, "
+                f"{stats['already_hugo']:,} already HUGO, "
+                f"{stats['unmapped_ensembl']:,} unmapped"
+            )
+            if stats["unmapped_ensembl"] > 0:
+                logger.warning(
+                    f"{stats['unmapped_ensembl']:,} Ensembl IDs not found in mapping; "
+                    "leaving them unchanged"
+                )
+        else:
+            logger.info(f"All {stats['already_hugo']:,} genes already HUGO symbols")
+
+        adata.var_names_make_unique()
+
+    if adata.raw is not None:
+        raw_converted, raw_stats, _, raw_used_feature = _normalize_var_names(
+            adata.raw.var_names, adata.raw.var, ensembl_to_hugo
+        )
+        raw_converted_index = pd.Index(raw_converted)
+
+        if raw_used_feature or not raw_converted_index.equals(adata.raw.var_names):
+            raw_adata = adata.raw.to_adata()
+            raw_adata.var_names = raw_converted_index
+            raw_adata.var_names_make_unique()
+            adata.raw = raw_adata
+            logger.info("Updated adata.raw.var_names to normalized HUGO symbols")
+            if raw_stats["unmapped_ensembl"] > 0:
+                logger.warning(
+                    f"{raw_stats['unmapped_ensembl']:,} raw Ensembl IDs not found in mapping; "
+                    "leaving them unchanged"
+                )
+
     return adata
 
 

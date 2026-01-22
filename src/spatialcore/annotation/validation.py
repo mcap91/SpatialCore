@@ -347,7 +347,79 @@ def validate_cell_type_column(
             log_fn = logger.error if issue.severity == "error" else logger.warning
             log_fn(f"  {issue.code}: {issue.message}")
 
-    return result
+        return result
+
+
+@dataclass
+class LabelOntologyConsistencyResult:
+    """Result of checking label to ontology ID consistency."""
+
+    label_column: str
+    ontology_column: str
+    n_labels: int
+    n_labels_with_multiple_ids: int
+    labels_with_multiple_ids: Dict[str, List[str]]
+    n_hierarchical_labels: int
+    hierarchical_labels: List[str]
+
+
+_HIERARCHY_PATTERN = re.compile(r"(?:\s>\s|\s->\s|;|\|)")
+
+
+def check_label_ontology_consistency(
+    adata: ad.AnnData,
+    label_column: str,
+    ontology_column: str,
+    detect_hierarchy: bool = True,
+) -> LabelOntologyConsistencyResult:
+    """
+    Check whether each label maps to a single ontology ID.
+
+    Flags labels that map to multiple valid CL IDs, which can cause label
+    collapsing when IDs are inferred from labels.
+    """
+    if label_column not in adata.obs.columns:
+        raise ValueError(
+            f"Label column '{label_column}' not found in adata.obs. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
+    if ontology_column not in adata.obs.columns:
+        raise ValueError(
+            f"Ontology column '{ontology_column}' not found in adata.obs. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
+
+    labels = adata.obs[label_column].dropna().astype(str)
+    n_labels = int(labels.nunique())
+
+    pairs = adata.obs[[label_column, ontology_column]].dropna()
+    pairs = pairs.drop_duplicates().astype(str)
+    valid_mask = pairs[ontology_column].str.startswith("CL:")
+    unique_pairs = pairs.loc[valid_mask, [label_column, ontology_column]]
+
+    labels_with_multiple_ids: Dict[str, List[str]] = {}
+    if not unique_pairs.empty:
+        grouped = unique_pairs.groupby(label_column)[ontology_column].unique()
+        for label, ids in grouped.items():
+            unique_ids = sorted(set(ids))
+            if len(unique_ids) > 1:
+                labels_with_multiple_ids[str(label)] = unique_ids
+
+    hierarchical_labels: List[str] = []
+    if detect_hierarchy:
+        for label in labels.unique():
+            if _HIERARCHY_PATTERN.search(str(label)):
+                hierarchical_labels.append(str(label))
+
+    return LabelOntologyConsistencyResult(
+        label_column=label_column,
+        ontology_column=ontology_column,
+        n_labels=n_labels,
+        n_labels_with_multiple_ids=len(labels_with_multiple_ids),
+        labels_with_multiple_ids=labels_with_multiple_ids,
+        n_hierarchical_labels=len(hierarchical_labels),
+        hierarchical_labels=hierarchical_labels,
+    )
 
 
 def validate_multiple_columns(
