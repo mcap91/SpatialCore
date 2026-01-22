@@ -10,6 +10,7 @@ SpatialCore provides methods for characterizing tissue microenvironments at two 
 
 | Concept | Definition | Key Property |
 |---------|------------|--------------|
+| **Neighborhood** | Immediate spatial vicinity of a cell (k-NN or radius) | Local context (input for niche/domain) |
 | **Niche** | Cellular microenvironment archetype defined by cell-type composition | Compositional (location-independent) |
 | **Domain** | Spatially contiguous tissue region | Spatial (partitions tissue) |
 

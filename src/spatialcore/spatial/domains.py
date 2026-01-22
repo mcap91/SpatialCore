@@ -533,12 +533,9 @@ def make_spatial_domains(
                     f"using cell_dist_um={effective_cell_dist_um}"
                 )
             else:
-                # Could not detect platform - use conservative default
-                effective_cell_dist_um = 225.0
-                logger.warning(
+                raise ValueError(
                     "Could not auto-detect platform from coordinate ranges. "
-                    f"Using default cell_dist_um={effective_cell_dist_um}. "
-                    "Consider specifying 'platform' parameter explicitly."
+                    "Provide 'platform' or 'cell_dist_um' explicitly."
                 )
         else:
             # Platform specified, use its defaults
@@ -644,6 +641,15 @@ make_spatial_domains(
         # Merge domain assignments back to adata
         output_df["cell"] = output_df["cell"].astype(str)
         domain_map = dict(zip(output_df["cell"], output_df["domain"]))
+
+        if assign_all_cells is False:
+            assigned_count = output_df["domain"].notna().sum()
+            if assigned_count == 0:
+                raise ValueError(
+                    "No cells were assigned to any domain. "
+                    "Try relaxing filters, adjusting cell_dist_um, or setting "
+                    "assign_all_cells=True."
+                )
 
         # Map domains to adata
         adata.obs[output_column] = adata.obs.index.map(domain_map)

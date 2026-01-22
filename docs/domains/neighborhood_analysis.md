@@ -4,9 +4,9 @@
 
 ---
 
-## 🎯 Overview
+## Overview
 
-Spatial transcriptomics platforms (Xenium, CosMx) provide not just cell types, but the *context* in which those cells reside. A **Niche** is a recurring microenvironment defined by its cell type composition—for example, a "Tumor-Immune Interface" or a "Vascular Niche."
+Spatial transcriptomics platforms (Xenium, CosMx) provide not just cell types, but the *context* in which those cells reside. A **Niche** is a recurring microenvironment defined by its cell type composition - for example, a "Tumor-Immune Interface" or a "Vascular Niche."
 
 This method is based on the neighborhood analysis framework originally introduced by **He et al. (Nature Biotechnology, 2022)** for the CosMx SMI platform.
 > [High-plex multi-omic analysis in FFPE tissue at single-cellular and subcellular resolution by spatial molecular imaging](https://www.nature.com/articles/s41587-022-01483-z)
@@ -18,7 +18,7 @@ This vignette demonstrates the standard SpatialCore workflow:
 
 ---
 
-## 🚀 Workflow
+## Workflow
 
 We use the **Xenium Human Liver Cancer** dataset for this demonstration ([10x Genomics Dataset](https://www.10xgenomics.com/datasets/human-liver-data-xenium-human-multi-tissue-and-cancer-panel-1-standard)). It contains 162,155 cells with 64 cell types annotated via [CellTypist](../celltyping/index.md).
 
@@ -43,6 +43,7 @@ sp.spatial.compute_neighborhood_profile(
 ```
 
 *   **Why k=50?** For subcellular resolution data (Xenium/CosMx), larger neighborhoods (50-100) capture the broader tissue context better than small local neighborhoods (15-30).
+*   **Note:** `k` excludes the center cell. Missing labels or empty neighborhoods raise an error. For radius-based neighborhoods, increase radius, switch to knn, or pre-filter isolated cells before profiling.
 
 **2. Identify Niches**{: .section-label }
 
@@ -60,7 +61,7 @@ sp.spatial.identify_niches(
 
 ---
 
-## 📊 Results
+## Results
 
 **Spatial Distribution**{: .section-label }
 
@@ -89,7 +90,7 @@ Projecting the *neighborhood profiles* (not expression) into UMAP space reveals 
 
 ---
 
-## ⚖️ Validation: Python vs R
+## Validation: Python vs R
 
 A core mission of SpatialCore is **exact cross-language reproducibility**. We benchmarked this Python implementation against an equivalent R workflow.
 
@@ -101,20 +102,29 @@ The R comparison uses the following implementation (FNN + ClusterR):
 library(FNN)
 library(ClusterR)
 
-# 1. Find k nearest neighbors for each cell
-neighbor_idx <- FNN::knn.index(spatial_coords, k = 50)
+# 1. Find k nearest neighbors for each cell (exclude self)
+k <- 50
+neighbor_idx <- FNN::knn.index(spatial_coords, k = k + 1)
 
 # 2. Build cell-type composition matrix
 profile_matrix <- matrix(0, nrow = n_cells, ncol = n_celltypes)
 for (i in seq_len(n_cells)) {
     neighbors <- neighbor_idx[i, ]
+    neighbors <- neighbors[neighbors != i]
+    if (length(neighbors) != k) {
+        stop(paste0("Expected ", k, " neighbors excluding self for cell ", i))
+    }
     neighbor_types <- cell_types[neighbors]
     for (ct in neighbor_types) {
         idx <- celltype_to_idx[[ct]]
         profile_matrix[i, idx] <- profile_matrix[i, idx] + 1
     }
 }
-profile_matrix <- profile_matrix / rowSums(profile_matrix)
+row_sums <- rowSums(profile_matrix)
+if (any(row_sums == 0)) {
+    stop("Empty neighborhoods detected. Increase radius, switch to knn, or pre-filter isolated cells before profiling.")
+}
+profile_matrix <- profile_matrix / row_sums
 
 # 3. Cluster with kmeans++
 set.seed(42)
@@ -149,7 +159,7 @@ Side-by-side comparison of spatial niche assignments demonstrates strong biologi
 
 ---
 
-## 💡 Best Practices
+## Best Practices
 
 *   **Choosing `k`**:
     *   **15-30**: Subcellular interactions (contact-dependent).
@@ -158,7 +168,7 @@ Side-by-side comparison of spatial niche assignments demonstrates strong biologi
     *   Start with **8-12** for most tissues.
     *   Use **MiniBatchKMeans** for datasets >100k cells for speed.
 *   **Quality Control**:
-    *   Check for "empty" neighborhoods (cells with no typed neighbors).
+    *   Empty neighborhoods are errors. Increase radius, switch to knn, or pre-filter isolated cells before profiling.
     *   Ensure niche sizes are balanced (avoid single-cell niches).
 
 ## Citation

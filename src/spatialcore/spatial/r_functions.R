@@ -15,6 +15,11 @@ suppressPackageStartupMessages({
     library(jsonlite)
 })
 
+if (Sys.info()[["sysname"]] == "Windows") {
+    sf::sf_use_s2(FALSE)
+    message("Windows detected: disabling s2 for sf operations")
+}
+
 #' Internal: Create spatial domains using Buffer-Union-Shrink algorithm
 #'
 #' @param input_csv Path to CSV with columns: cell, x, y, <group>
@@ -35,7 +40,8 @@ suppressPackageStartupMessages({
     }
 
     # Read input data from CSV
-    object <- read.csv(input_csv, stringsAsFactors = FALSE)
+    # check.names = FALSE preserves Python column names like "_filter"
+    object <- read.csv(input_csv, stringsAsFactors = FALSE, check.names = FALSE)
 
     # Validate required columns
     required_cols <- c("cell", "x", "y", group)
@@ -144,6 +150,9 @@ suppressPackageStartupMessages({
     # Use group info from result if not provided
     if (is.null(group)) group <- result$group
     if (is.null(group_subset)) group_subset <- result$group_subset
+    if (is.null(group) || is.null(group_subset)) {
+        stop("group and group_subset are required for domain reduction.")
+    }
 
     # Calculate TOTAL cells per domain (all cells)
     metadata <- metadata %>%
@@ -152,20 +161,17 @@ suppressPackageStartupMessages({
         ungroup()
 
     # Calculate TARGET cells per domain (cells matching filter)
-    if (!is.null(group) && !is.null(group_subset) && group %in% names(metadata)) {
-        target_counts <- metadata %>%
-            filter(!is.na(domain) & .data[[group]] == group_subset) %>%
-            group_by(domain) %>%
-            summarise(ncell_target = n(), .groups = "drop")
-
-        metadata <- metadata %>%
-            left_join(target_counts, by = "domain") %>%
-            mutate(ncell_target = ifelse(is.na(ncell_target), 0, ncell_target))
-    } else {
-        # No group info - use total as target
-        metadata <- metadata %>%
-            mutate(ncell_target = ncell_total)
+    if (!(group %in% names(metadata))) {
+        stop(paste("Missing group column in metadata:", group))
     }
+    target_counts <- metadata %>%
+        filter(!is.na(domain) & .data[[group]] == group_subset) %>%
+        group_by(domain) %>%
+        summarise(ncell_target = n(), .groups = "drop")
+
+    metadata <- metadata %>%
+        left_join(target_counts, by = "domain") %>%
+        mutate(ncell_target = ifelse(is.na(ncell_target), 0, ncell_target))
 
     # Identify domains to merge based on DUAL filtering
     domains_merge <- c()

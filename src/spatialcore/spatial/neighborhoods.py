@@ -52,7 +52,6 @@ def compute_neighborhood_profile(
     k: int = 15,
     radius: Optional[float] = None,
     normalize: bool = True,
-    include_center: bool = False,
     spatial_key: str = "spatial",
     key_added: str = "neighborhood_profile",
     copy: bool = False,
@@ -70,14 +69,15 @@ def compute_neighborhood_profile(
         AnnData object with spatial coordinates in adata.obsm[spatial_key].
     celltype_column
         Column in adata.obs containing cell type labels.
+        Missing labels are not allowed; fill or filter them first.
     method
         Method to define neighborhood:
 
         - "knn": k-nearest neighbors (default)
         - "radius": all cells within fixed radius
     k
-        Number of neighbors for knn method. Default: 15.
-        Ignored if method="radius".
+        Number of neighbors for knn method (excluding the center cell).
+        Default: 15. Ignored if method="radius".
     radius
         Distance threshold for radius method. Required if method="radius".
         Units should match spatial coordinates (microns for Xenium, pixels for CosMx).
@@ -87,9 +87,6 @@ def compute_neighborhood_profile(
 
         - normalize=True: [0.6, 0.4] (proportions)
         - normalize=False: [6, 4] (raw counts)
-    include_center
-        If True, include the center cell itself in its neighborhood profile.
-        Default: False (only count neighbors).
     spatial_key
         Key in adata.obsm containing spatial coordinates. Default: "spatial".
     key_added
@@ -109,13 +106,15 @@ def compute_neighborhood_profile(
     ------
     ValueError
         If celltype_column not found, spatial coordinates missing,
-        or invalid parameters.
+        missing labels, empty neighborhoods, or invalid parameters.
 
     Notes
     -----
     Uses scipy.spatial.cKDTree for efficient O(n log n) neighbor queries.
-    For radius method, cells at tissue edges may have fewer neighbors;
-    normalization handles this by converting to proportions.
+    For radius method, cells at tissue edges may have fewer neighbors.
+    If any cell has no neighbors, this function raises a ValueError to
+    avoid silent fallbacks. Use a larger radius, switch to knn, or
+    pre-filter isolated cells before profiling.
 
     Examples
     --------
@@ -161,8 +160,14 @@ def compute_neighborhood_profile(
             f"Invalid method: '{method}'. Must be 'knn' or 'radius'."
         )
 
+    n_cells = adata.n_obs
+
     if method == "knn" and k < 1:
         raise ValueError(f"k must be >= 1, got {k}")
+    if method == "knn" and k >= n_cells:
+        raise ValueError(
+            f"k must be < number of cells ({n_cells}), got {k}"
+        )
 
     if method == "radius":
         if radius is None:
@@ -177,11 +182,18 @@ def compute_neighborhood_profile(
 
     # Get spatial coordinates
     spatial_coords = adata.obsm[spatial_key]
-    n_cells = adata.n_obs
 
     # Get cell types and create index mapping
-    cell_types = adata.obs[celltype_column].values
-    unique_celltypes = sorted(adata.obs[celltype_column].dropna().unique())
+    celltype_series = adata.obs[celltype_column]
+    if celltype_series.isna().any():
+        n_missing = int(celltype_series.isna().sum())
+        raise ValueError(
+            f"{n_missing} cells have missing labels in '{celltype_column}'. "
+            "Fill or remove missing labels before computing neighborhoods."
+        )
+
+    cell_types = celltype_series.values
+    unique_celltypes = sorted(celltype_series.unique())
     n_celltypes = len(unique_celltypes)
     celltype_to_idx = {ct: i for i, ct in enumerate(unique_celltypes)}
 
@@ -206,57 +218,55 @@ def compute_neighborhood_profile(
     # Query neighbors based on method
     if method == "knn":
         logger.debug(f"Querying {k} nearest neighbors per cell")
-        # Query k+1 to include self, then optionally remove
-        query_k = k + 1 if not include_center else k + 1
-        distances, neighbor_indices = tree.query(spatial_coords, k=query_k)
-
-        # Remove self (first column) if not including center
-        if not include_center:
-            neighbor_indices = neighbor_indices[:, 1:]
+        # Query k+1 to include self, then remove
+        query_k = k + 1
+        _, neighbor_indices = tree.query(spatial_coords, k=query_k)
 
         # Count cell types for each cell (vectorized where possible)
         for i in range(n_cells):
             neighbors = neighbor_indices[i]
+            neighbors = neighbors[neighbors != i]
+            if neighbors.size != k:
+                raise ValueError(
+                    f"Expected {k} neighbors excluding self for cell {i}, "
+                    f"got {neighbors.size}."
+                )
             neighbor_types = cell_types[neighbors]
 
             for ct in neighbor_types:
-                if pd.notna(ct) and ct in celltype_to_idx:
-                    neighborhood_profile[i, celltype_to_idx[ct]] += 1
+                neighborhood_profile[i, celltype_to_idx[ct]] += 1
 
     else:  # radius method
         logger.debug(f"Querying neighbors within radius={radius}")
         neighbor_lists = tree.query_ball_point(spatial_coords, r=radius)
 
         for i, neighbors in enumerate(neighbor_lists):
-            # Remove self if not including center
-            if not include_center:
-                neighbors = [n for n in neighbors if n != i]
-
+            neighbors = [n for n in neighbors if n != i]
             if len(neighbors) == 0:
                 continue
 
             neighbor_types = cell_types[neighbors]
 
             for ct in neighbor_types:
-                if pd.notna(ct) and ct in celltype_to_idx:
-                    neighborhood_profile[i, celltype_to_idx[ct]] += 1
+                neighborhood_profile[i, celltype_to_idx[ct]] += 1
+
+    row_sums = neighborhood_profile.sum(axis=1)
+    n_empty = int((row_sums == 0).sum())
+    if n_empty > 0:
+        raise ValueError(
+            f"{n_empty} cells have empty neighborhood profiles. "
+            "Increase radius, switch to knn, or pre-filter isolated cells "
+            "before profiling."
+        )
 
     # Normalize to proportions if requested
     if normalize:
-        row_sums = neighborhood_profile.sum(axis=1, keepdims=True)
-        # Avoid division by zero (cells with no neighbors)
-        row_sums[row_sums == 0] = 1
-        neighborhood_profile = neighborhood_profile / row_sums
+        neighborhood_profile = neighborhood_profile / row_sums[:, None]
         logger.debug("Normalized profiles to proportions")
 
     # Store results
     adata.obsm[key_added] = neighborhood_profile
     adata.uns[f"{key_added}_celltypes"] = list(unique_celltypes)
-
-    # Log summary statistics
-    n_empty = (neighborhood_profile.sum(axis=1) == 0).sum()
-    if n_empty > 0:
-        logger.warning(f"{n_empty} cells have no neighbors (empty profiles)")
 
     logger.info(
         f"Stored neighborhood profiles in adata.obsm['{key_added}'] "
@@ -273,7 +283,6 @@ def compute_neighborhood_profile(
             "k": k if method == "knn" else None,
             "radius": radius if method == "radius" else None,
             "normalize": normalize,
-            "include_center": include_center,
             "spatial_key": spatial_key,
         },
         outputs={
@@ -347,13 +356,16 @@ def identify_niches(
     Raises
     ------
     ValueError
-        If neighborhood profiles not found or invalid parameters.
+        If neighborhood profiles not found, contain empty profiles,
+        or invalid parameters.
 
     Notes
     -----
     Uses kmeans++ initialization for smarter centroid selection, avoiding
     poor local minima. For datasets >100k cells, consider using
     method="minibatch_kmeans" for faster clustering.
+    Empty neighborhood profiles are not allowed; fix neighborhood
+    computation before clustering.
 
     The number of niches is a hyperparameter that may require tuning.
     Consider using silhouette scores or biological interpretation to
@@ -410,8 +422,6 @@ def identify_niches(
 
     # Get neighborhood profiles
     profiles = adata.obsm[neighborhood_key]
-    n_celltypes = profiles.shape[1]
-
     logger.info(
         f"Identifying {n_niches} niches from {n_cells:,} cells "
         f"(method={method}, random_state={random_state})"
@@ -419,11 +429,12 @@ def identify_niches(
 
     # Check for cells with empty profiles (all zeros)
     empty_mask = profiles.sum(axis=1) == 0
-    n_empty = empty_mask.sum()
+    n_empty = int(empty_mask.sum())
     if n_empty > 0:
-        logger.warning(
+        raise ValueError(
             f"{n_empty} cells have empty neighborhood profiles. "
-            "These will be assigned to the nearest niche."
+            "Increase radius, switch to knn, or pre-filter isolated cells "
+            "before profiling."
         )
 
     # Run clustering with kmeans++ initialization

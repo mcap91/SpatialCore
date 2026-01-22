@@ -19,6 +19,8 @@ Notes:
     - R must be installed and Rscript accessible in PATH
     - Install R via: mamba install -c conda-forge r-base
     - For reticulate-based scripts, RETICULATE_PYTHON is set automatically
+    - Windows support is best-effort. If sf-based workflows crash (e.g. access
+      violation 1073741819), use WSL or Linux for domain detection.
 """
 
 from spatialcore.r_bridge.subprocess_runner import (

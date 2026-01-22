@@ -356,8 +356,12 @@ def run_r_script(
     if not script_path.exists():
         raise FileNotFoundError(f"R script not found: {script_path}")
 
-    rscript = _find_rscript()
-    if not rscript:
+    rscript_args = [str(script_path)]
+    if args:
+        rscript_args.extend([str(a) for a in args])
+
+    cmd = _build_rscript_command(rscript_args)
+    if not cmd:
         raise RNotFoundError(
             "Rscript not found in conda environment or PATH. "
             "Install R via: mamba install -c conda-forge r-base"
@@ -369,29 +373,22 @@ def run_r_script(
     if env_vars:
         env.update(env_vars)
 
-    # On Windows, use mamba/conda run to properly set up DLL paths
-    # This is necessary because R DLLs aren't in PATH when running via subprocess
-    use_mamba_run = False
-    mamba_conda = None
-    env_name = None
-
-    if sys.platform == "win32":
-        mamba_conda = _find_mamba_or_conda()
-        env_name = _get_current_env_name()
-        if mamba_conda and env_name:
-            use_mamba_run = True
-            logger.debug(f"Using mamba/conda run: {mamba_conda} -n {env_name}")
-
-    # Build command
-    if use_mamba_run:
-        # Use: mamba run -n env_name Rscript script.R args...
-        cmd = [mamba_conda, "run", "-n", env_name, "Rscript", str(script_path)]
+    uses_conda_run = len(cmd) >= 4 and cmd[1] == "run"
+    if uses_conda_run:
+        runner_name = Path(cmd[0]).name.lower()
+        if "mamba" in runner_name and not env.get("MAMBA_ROOT_PREFIX"):
+            env_prefix = Path(sys.prefix)
+            if "envs" in env_prefix.parts:
+                idx = env_prefix.parts.index("envs")
+                base_prefix = Path(*env_prefix.parts[:idx])
+            else:
+                base_prefix = env_prefix
+            env["MAMBA_ROOT_PREFIX"] = str(base_prefix)
+            logger.info(f"Setting MAMBA_ROOT_PREFIX={base_prefix}")
+    if uses_conda_run:
+        logger.info("Using conda/mamba run for Rscript execution")
     else:
-        # Direct Rscript execution
-        cmd = [rscript, str(script_path)]
-
-    if args:
-        cmd.extend([str(a) for a in args])
+        logger.info("Using direct Rscript execution")
 
     # Determine working directory
     working_dir = str(cwd) if cwd else str(script_path.parent)
@@ -431,7 +428,23 @@ def run_r_script(
         # Also include stdout as it may contain error messages
         if result.stdout:
             error_msg = f"{error_msg}\n\nStdout:\n{result.stdout}"
-        raise RExecutionError(f"R script failed (exit code {result.returncode}):\n{error_msg}")
+        if "there is no package called" in error_msg:
+            error_msg = (
+                f"{error_msg}\n\n"
+                "Hint: Missing R package(s). Install the required R dependencies "
+                "for this function."
+            )
+        if sys.platform == "win32" and (
+            "1073741819" in error_msg or "0xC0000005" in error_msg
+        ):
+            error_msg = (
+                f"{error_msg}\n\n"
+                "Hint: R crashed on Windows (access violation). "
+                "For sf-based spatial workflows, use WSL or Linux."
+            )
+        raise RExecutionError(
+            f"R script failed (exit code {result.returncode}):\n{error_msg}"
+        )
 
     # Parse JSON from last line of stdout
     output_lines = result.stdout.strip().split("\n") if result.stdout else []
@@ -499,8 +512,8 @@ def run_r_code(
     >>> print(result)
     {'x': 1, 'y': 2}
     """
-    rscript = _find_rscript()
-    if not rscript:
+    cmd = _build_rscript_command(["-e", code])
+    if not cmd:
         raise RNotFoundError(
             "Rscript not found in conda environment or PATH. "
             "Install R via: mamba install -c conda-forge r-base"
@@ -512,8 +525,22 @@ def run_r_code(
     if env_vars:
         env.update(env_vars)
 
-    cmd = [rscript, "-e", code]
-
+    uses_conda_run = len(cmd) >= 4 and cmd[1] == "run"
+    if uses_conda_run:
+        runner_name = Path(cmd[0]).name.lower()
+        if "mamba" in runner_name and not env.get("MAMBA_ROOT_PREFIX"):
+            env_prefix = Path(sys.prefix)
+            if "envs" in env_prefix.parts:
+                idx = env_prefix.parts.index("envs")
+                base_prefix = Path(*env_prefix.parts[:idx])
+            else:
+                base_prefix = env_prefix
+            env["MAMBA_ROOT_PREFIX"] = str(base_prefix)
+            logger.info(f"Setting MAMBA_ROOT_PREFIX={base_prefix}")
+    if uses_conda_run:
+        logger.info("Using conda/mamba run for R execution")
+    else:
+        logger.info("Using direct Rscript execution")
     logger.debug(f"Running R code: {code[:100]}...")
 
     try:
@@ -529,6 +556,20 @@ def run_r_code(
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+        if "there is no package called" in error_msg:
+            error_msg = (
+                f"{error_msg}\n\n"
+                "Hint: Missing R package(s). Install the required R dependencies "
+                "for this function."
+            )
+        if sys.platform == "win32" and (
+            "1073741819" in error_msg or "0xC0000005" in error_msg
+        ):
+            error_msg = (
+                f"{error_msg}\n\n"
+                "Hint: R crashed on Windows (access violation). "
+                "For sf-based spatial workflows, use WSL or Linux."
+            )
         raise RExecutionError(f"R code failed:\n{error_msg}")
 
     # Try to parse JSON from output
