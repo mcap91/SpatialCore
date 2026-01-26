@@ -319,7 +319,7 @@ def annotate_celltypist(
         - cell_type_confidence_raw: Winning-model probability (CellTypist default).
           Decision scores are stored separately in obsm when available.
         - cell_type_model: Which model contributed each prediction
-        - cell_type_original: Per-cell predictions (before any voting)
+        - cell_type_predicted: Per-cell predictions (before any voting)
 
         And optionally in obsm (if store_decision_scores=True):
         - cell_type_decision_scores: Full decision score matrix (n_cells x n_types)
@@ -366,7 +366,7 @@ def annotate_celltypist(
     ...     ensemble_mode=True,
     ...     majority_voting=False,  # Default for spatial
     ... )
-    >>> adata.obs[["celltypist", "celltypist_confidence"]].head()
+    >>> adata.obs[["cell_type", "cell_type_confidence"]].head()
     """
     try:
         import celltypist
@@ -620,8 +620,8 @@ def annotate_celltypist(
         per_cell_confidence = np.array(final_confidence)
         per_cell_source_model = pd.Series(final_source_model, index=cell_indices)
 
-    # Store results (CellxGene standard column names)
-    adata.obs["cell_type_original"] = per_cell_predictions.values
+    # Store results (CellxGene standard + required provenance)
+    adata.obs["cell_type_predicted"] = per_cell_predictions.values
     adata.obs["cell_type_confidence_raw"] = per_cell_confidence
     adata.obs["cell_type_model"] = per_cell_source_model.values
 
@@ -728,11 +728,10 @@ def get_annotation_summary(adata: ad.AnnData) -> pd.DataFrame:
     >>> summary = get_annotation_summary(adata)
     >>> print(summary.head())
     """
-    # Support both old (celltypist) and new (cell_type) column names
-    label_col = "cell_type" if "cell_type" in adata.obs.columns else "celltypist"
-    conf_col = "cell_type_confidence" if "cell_type_confidence" in adata.obs.columns else "celltypist_confidence"
+    label_col = "cell_type"
+    conf_col = "cell_type_confidence"
 
-    if label_col not in adata.obs.columns:
+    if label_col not in adata.obs.columns or conf_col not in adata.obs.columns:
         raise ValueError("No cell type annotations found. Run annotate_celltypist first.")
 
     summary = adata.obs.groupby(label_col).agg({

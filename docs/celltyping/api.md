@@ -28,6 +28,7 @@ All outputs use the [CellxGene schema](https://github.com/chanzuckerberg/single-
 | Column | Type | Description |
 |--------|------|-------------|
 | `cell_type` | `str` | Final cell type (ontology-mapped, confidence-filtered) |
+| `cell_type_predicted` | `str` | Raw model prediction before confidence filtering |
 | `cell_type_confidence` | `float` | Z-score transformed confidence [0, 1] |
 | `cell_type_confidence_raw` | `float` | Winning-model probability from CellTypist (decision scores live in `cell_type_decision_scores` when available) |
 | `cell_type_ontology_term_id` | `str` | Cell Ontology ID (e.g., `CL:0000624`) |

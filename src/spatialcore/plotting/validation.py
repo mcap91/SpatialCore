@@ -633,8 +633,8 @@ def plot_celltype_confidence(
     >>> from spatialcore.plotting.validation import plot_celltype_confidence
     >>> fig = plot_celltype_confidence(
     ...     adata,
-    ...     label_column="celltypist",
-    ...     confidence_column="celltypist_confidence_transformed",
+    ...     label_column="cell_type",
+    ...     confidence_column="cell_type_confidence",
     ...     threshold=0.8,
     ... )
     """
@@ -965,7 +965,7 @@ def plot_ontology_mapping(
     Plot ontology mapping table showing original labels mapped to Cell Ontology.
 
     Creates a table visualization with:
-    - Original CellTypist labels
+    - Original model labels
     - Mapped ontology names and CL IDs
     - Match tier (tier0=pattern, tier1=exact, etc.)
     - Matching score (actual score from matching, not hardcoded)
@@ -976,7 +976,7 @@ def plot_ontology_mapping(
     adata : AnnData
         Annotated data with ontology mapping columns.
     source_label_column : str
-        Column with original cell type labels (e.g., "celltypist").
+        Column with original model labels (e.g., "cell_type_predicted").
     ontology_name_column : str
         Column with mapped ontology names.
     ontology_id_column : str
@@ -1003,19 +1003,19 @@ def plot_ontology_mapping(
     >>> # Using adata columns (scores read from {id_column}_score)
     >>> fig = plot_ontology_mapping(
     ...     adata,
-    ...     source_label_column="celltypist",
-    ...     ontology_name_column="celltypist_ontology_name",
-    ...     ontology_id_column="celltypist_ontology_id",
+    ...     source_label_column="cell_type_predicted",
+    ...     ontology_name_column="cell_type_ontology_label",
+    ...     ontology_id_column="cell_type_ontology_term_id",
     ... )
 
     >>> # Using pre-computed mapping table
     >>> from spatialcore.annotation import add_ontology_ids
-    >>> adata, mappings, result = add_ontology_ids(adata, "celltypist", save_mapping="./")
+    >>> adata, mappings, result = add_ontology_ids(adata, "cell_type_predicted", save_mapping="./")
     >>> fig = plot_ontology_mapping(
     ...     adata,
-    ...     source_label_column="celltypist",
-    ...     ontology_name_column="celltypist_ontology_name",
-    ...     ontology_id_column="celltypist_ontology_id",
+    ...     source_label_column="cell_type_predicted",
+    ...     ontology_name_column="cell_type_ontology_label",
+    ...     ontology_id_column="cell_type_ontology_term_id",
     ...     mapping_table=result.table,
     ... )
     """
@@ -1024,7 +1024,7 @@ def plot_ontology_mapping(
         summary = mapping_table.copy()
         # Rename columns to display names
         col_map = {
-            "input_label": "CellTypist Label",
+            "input_label": "Source Label",
             "ontology_name": "Ontology Name",
             "ontology_id": "CL ID",
             "match_tier": "Match Tier",
@@ -1046,15 +1046,14 @@ def plot_ontology_mapping(
                     f"Available columns: {list(adata.obs.columns)}"
                 )
 
-        # Check for tier and score columns (derived from ontology_id_column)
+        # Check for tier and score columns (CellxGene standard)
+        tier_column = None
+        score_column = None
         if ontology_id_column.endswith("_term_id"):
             tier_column = ontology_id_column.replace("_term_id", "_tier")
             score_column = ontology_id_column.replace("_term_id", "_score")
-        else:
-            tier_column = ontology_id_column.replace("_id", "_tier")
-            score_column = ontology_id_column.replace("_id", "_score")
-        has_tier_column = tier_column in adata.obs.columns
-        has_score_column = score_column in adata.obs.columns
+        has_tier_column = tier_column in adata.obs.columns if tier_column else False
+        has_score_column = score_column in adata.obs.columns if score_column else False
 
         # Build mapping summary - convert to string to avoid categorical issues
         cols_to_use = [source_label_column, ontology_name_column, ontology_id_column]
@@ -1089,13 +1088,13 @@ def plot_ontology_mapping(
 
         # Rename columns based on what we have
         if has_tier_column and has_score_column:
-            summary.columns = ["CellTypist Label", "Ontology Name", "CL ID", "Cells", "Match Tier", "Score"]
+            summary.columns = ["Source Label", "Ontology Name", "CL ID", "Cells", "Match Tier", "Score"]
         elif has_tier_column:
-            summary.columns = ["CellTypist Label", "Ontology Name", "CL ID", "Cells", "Match Tier"]
+            summary.columns = ["Source Label", "Ontology Name", "CL ID", "Cells", "Match Tier"]
         elif has_score_column:
-            summary.columns = ["CellTypist Label", "Ontology Name", "CL ID", "Cells", "Score"]
+            summary.columns = ["Source Label", "Ontology Name", "CL ID", "Cells", "Score"]
         else:
-            summary.columns = ["CellTypist Label", "Ontology Name", "CL ID", "Cells"]
+            summary.columns = ["Source Label", "Ontology Name", "CL ID", "Cells"]
 
         # Add tier column if missing
         if "Match Tier" not in summary.columns:
@@ -1126,7 +1125,7 @@ def plot_ontology_mapping(
 
     # Fill empty values with placeholder
     summary["CL ID"] = summary["CL ID"].replace("", "-")
-    summary.loc[summary["Ontology Name"] == "", "Ontology Name"] = summary.loc[summary["Ontology Name"] == "", "CellTypist Label"]
+    summary.loc[summary["Ontology Name"] == "", "Ontology Name"] = summary.loc[summary["Ontology Name"] == "", "Source Label"]
 
     # Sort by cell count descending
     summary = summary.sort_values("Cells", ascending=False).reset_index(drop=True)
@@ -1158,7 +1157,7 @@ def plot_ontology_mapping(
 
     # Title and stats at top
     if title is None:
-        title = "CellTypist to Cell Ontology Mapping"
+        title = "Source Label to Cell Ontology Mapping"
 
     fig.text(
         0.5, 0.97,
@@ -1169,7 +1168,7 @@ def plot_ontology_mapping(
     fig.text(0.5, 0.93, title, ha="center", fontsize=14, fontweight="bold")
 
     # Reorder columns for display
-    display_cols = ["CellTypist Label", "Ontology Name", "CL ID", "Match Tier", "Score", "Cells"]
+    display_cols = ["Source Label", "Ontology Name", "CL ID", "Match Tier", "Score", "Cells"]
     summary = summary[display_cols]
 
     # Create table
@@ -1252,6 +1251,8 @@ def generate_annotation_plots(
         Annotated data with cell type labels and confidence scores.
     label_column : str, default "cell_type"
         Column containing cell type labels (CellxGene standard).
+        If ontology_name_column is provided and exists, plots use that
+        column to display mapped ontology names.
     confidence_column : str, default "cell_type_confidence"
         Column containing confidence values (z-score transformed, CellxGene standard).
     output_dir : str or Path, optional
@@ -1266,12 +1267,12 @@ def generate_annotation_plots(
     n_deg_genes : int, default 10
         Number of top DEGs per cell type for heatmap.
     source_label_column : str, optional
-        Original CellTypist label column (for ontology mapping table).
-        If None, tries to infer from label_column.
+        Original model label column (for ontology mapping table).
+        If None, defaults to "cell_type_predicted" when present, else "cell_type".
     ontology_name_column : str, optional
-        Ontology name column. If None, tries "{source}_ontology_name".
+        Ontology name column. If None, uses "cell_type_ontology_label" if present.
     ontology_id_column : str, optional
-        Ontology ID column. If None, tries "{source}_ontology_id".
+        Ontology ID column. If None, uses "cell_type_ontology_term_id" if present.
     spatial_key : str, default "spatial"
         Key for spatial coordinates in adata.obsm.
 
@@ -1299,35 +1300,31 @@ def generate_annotation_plots(
 
     results = {"figures": {}, "summary": None, "paths": {}}
 
-    # Infer ontology column names if not provided
-    # Try to find source label column (original predictions before ontology mapping)
+    # Infer column names if not provided (CellxGene standard only)
     if source_label_column is None:
-        # Use the label_column as source (cell_type is the predicted type)
-        source_label_column = label_column
+        source_label_column = (
+            "cell_type_predicted" if "cell_type_predicted" in adata.obs.columns else "cell_type"
+        )
 
-    if ontology_name_column is None:
-        # Try CellxGene standard: cell_type_ontology_label
-        candidate = "cell_type_ontology_label"
-        if candidate in adata.obs.columns:
-            ontology_name_column = candidate
-        else:
-            # Try legacy pattern: {base}_ontology_name
-            base = label_column.replace("_ontology_name", "")
-            candidate = f"{base}_ontology_name"
-            if candidate in adata.obs.columns:
-                ontology_name_column = candidate
+    if ontology_name_column is None and "cell_type_ontology_label" in adata.obs.columns:
+        ontology_name_column = "cell_type_ontology_label"
 
-    if ontology_id_column is None:
-        # Try CellxGene standard: cell_type_ontology_term_id
-        candidate = "cell_type_ontology_term_id"
-        if candidate in adata.obs.columns:
-            ontology_id_column = candidate
-        else:
-            # Try legacy pattern: {base}_ontology_id
-            base = label_column.replace("_ontology_name", "")
-            candidate = f"{base}_ontology_id"
-            if candidate in adata.obs.columns:
-                ontology_id_column = candidate
+    if ontology_id_column is None and "cell_type_ontology_term_id" in adata.obs.columns:
+        ontology_id_column = "cell_type_ontology_term_id"
+
+    # Prefer mapped ontology names for plots when available
+    plot_label_column = (
+        ontology_name_column
+        if ontology_name_column and ontology_name_column in adata.obs.columns
+        else label_column
+    )
+
+    # Guard against duplicate mapping columns
+    mapping_cols = [c for c in [source_label_column, ontology_name_column, ontology_id_column] if c]
+    if len(mapping_cols) != len(set(mapping_cols)):
+        raise ValueError(
+            "plot_ontology_mapping requires distinct source, ontology name, and ontology ID columns."
+        )
 
     # 0. Ontology Mapping Table
     logger.info("Generating ontology mapping table...")
@@ -1354,7 +1351,7 @@ def generate_annotation_plots(
     path_2d = output_dir / f"{prefix}_2d_validation.png" if output_dir else None
     fig_2d, summary = plot_2d_validation(
         adata,
-        label_column=label_column,
+        label_column=plot_label_column,
         confidence_column=confidence_column,
         markers=markers,
         confidence_threshold=confidence_threshold,
@@ -1371,7 +1368,7 @@ def generate_annotation_plots(
     path_conf = output_dir / f"{prefix}_confidence.png" if output_dir else None
     fig_conf = plot_celltype_confidence(
         adata,
-        label_column=label_column,
+        label_column=plot_label_column,
         confidence_column=confidence_column,
         spatial_key=spatial_key,
         threshold=confidence_threshold,
@@ -1387,7 +1384,7 @@ def generate_annotation_plots(
     try:
         fig_deg = plot_deg_heatmap(
             adata,
-            label_column=label_column,
+            label_column=plot_label_column,
             n_genes=n_deg_genes,
             save=path_deg,
         )
