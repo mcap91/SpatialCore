@@ -56,9 +56,9 @@ CELL_TYPE_PATTERNS = {
     r"^b\s*cell|^b\s+cells?$|^b$": "b cell",
 
     # Plasma cells with immunoglobulin types
-    r"iga\+?\s*plasma": "iga plasmacyte",
-    r"igg\+?\s*plasma": "igg plasmacyte",
-    r"igm\+?\s*plasma": "igm plasmacyte",
+    r"iga\+?\s*plasma": "iga plasma cell",
+    r"igg\+?\s*plasma": "igg plasma cell",
+    r"igm\+?\s*plasma": "igm plasma cell",
     r"^plasma\s*cell|^plasma\s*$|b[_\s\-]*plasma": "plasma cell",
 
     # NK cells

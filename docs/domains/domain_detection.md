@@ -8,6 +8,8 @@
 
 **Domains** are spatially coherent tissue regions with consistent cell-type composition and expression patterns. Unlike [niches](neighborhood_analysis.md), which are compositional archetypes that can appear anywhere, domains explicitly segment the tissue into bounded spatial areas.
 
+Beyond niche-based segmentation, `make_spatial_domains` functions as a general **tissue decomposition** tool—aggregating cells of any shared category into discrete, spatially contiguous regions. The input is flexible: cell types, niche labels from neighborhood analysis, or any categorical variable in `adata.obs` can seed domain detection. This makes domains useful for questions like "where are the B cell zones?" or "which tissue areas share a common microenvironment?"
+
 This vignette uses **B cells** from CosMx colon data and follows the workflow shown below. The outputs are saved to `docs/domains/domain_detection_images`.
 
 ---

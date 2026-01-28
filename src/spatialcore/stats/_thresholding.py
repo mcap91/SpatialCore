@@ -338,6 +338,7 @@ def threshold_gmm(
         "sorted_component_indices": sorted_indices.tolist(),
         "high_component_idx": high_component,
         "probability_cutoff": probability_cutoff,
+        "gmm_model": gmm,  # Fitted model for reuse when downsampling
     }
 
     return threshold, cluster_labels, probability_high, params

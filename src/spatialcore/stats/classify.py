@@ -174,9 +174,10 @@ def _plot_gpairs(
     threshold: float,
     metagene_method: str,
     threshold_method: str,
-    column_prefix: str,
+    probability_cutoff: float,
     output_path: Path,
     n_sample: int = 20000,
+    seed: int = 42,
 ) -> None:
     """
     Generate gpairs-style histogram + scatter matrix plot.
@@ -201,12 +202,14 @@ def _plot_gpairs(
         Method used for metagene calculation.
     threshold_method
         Method used for threshold detection.
-    column_prefix
-        Prefix for output column names and plot title.
+    probability_cutoff
+        Probability cutoff used for GMM cluster assignment.
     output_path
         Path to save the figure.
     n_sample
         Maximum number of points to plot (for performance).
+    seed
+        Random seed for reproducible subsampling.
     """
     n_genes = len(feature_columns)
     n_pairs = n_genes * (n_genes - 1) // 2
@@ -214,8 +217,8 @@ def _plot_gpairs(
     # Subsample if needed
     n_cells = len(scores)
     if n_cells > n_sample:
-        np.random.seed(42)
-        idx = np.random.choice(n_cells, size=n_sample, replace=False)
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(n_cells, size=n_sample, replace=False)
         scores_plot = scores[idx]
         features_plot = feature_values[idx]
         clusters_plot = cluster_labels[idx]
@@ -280,9 +283,18 @@ def _plot_gpairs(
     scores_low = scores_plot[clusters_plot == 0]
     scores_high = scores_plot[clusters_plot == 1]
 
-    # Compute common bins
+    # Compute common bins - guard against degenerate case
     all_scores = np.concatenate([scores_low, scores_high])
-    bins = np.linspace(all_scores.min(), all_scores.max(), 50)
+    score_range = all_scores.max() - all_scores.min()
+    if score_range < 1e-10:
+        # Degenerate case: all scores identical
+        logger.warning(
+            f"All metagene scores are identical ({all_scores[0]:.4f}). "
+            "Classification may not be meaningful."
+        )
+        bins = np.array([all_scores.min() - 0.5, all_scores.max() + 0.5])
+    else:
+        bins = np.linspace(all_scores.min(), all_scores.max(), 50)
 
     # Plot histograms with density
     ax_hist.hist(
@@ -302,18 +314,22 @@ def _plot_gpairs(
             kde_low = stats.gaussian_kde(scores_low)
             ax_hist.plot(x_kde, kde_low(x_kde), color=color_low, lw=2)
         except np.linalg.LinAlgError:
-            pass  # Skip KDE for degenerate data
+            logger.debug("KDE skipped for low cluster (singular covariance)")
 
     if len(scores_high) > 10:
         try:
             kde_high = stats.gaussian_kde(scores_high)
             ax_hist.plot(x_kde, kde_high(x_kde), color=color_high, lw=2)
         except np.linalg.LinAlgError:
-            pass  # Skip KDE for degenerate data
+            logger.debug("KDE skipped for high cluster (singular covariance)")
 
     # Threshold line
+    if threshold_method == "gmm":
+        threshold_label = f"Threshold: {threshold:.4f} (P cutoff: {probability_cutoff})"
+    else:
+        threshold_label = f"Threshold: {threshold:.4f}"
     ax_hist.axvline(threshold, color="#2ca02c", lw=2.5, ls="--",
-                    label=f"Threshold: {threshold:.4f}")
+                    label=threshold_label)
 
     # Labels and title
     gene_str = " + ".join(feature_columns)
@@ -325,11 +341,11 @@ def _plot_gpairs(
     ax_hist.set_ylabel("Density", fontsize=11)
 
     # Subtitle with method info (placed below title via figure suptitle approach)
-    fig.text(
-        0.5, 0.98,
-        f"Method: {metagene_method} + {threshold_method.upper()} | Pctg cutoff: 0.3",
-        ha="center", fontsize=9, color="gray"
-    )
+    if threshold_method == "gmm":
+        subtitle = f"Method: {metagene_method} + GMM | P(high) cutoff: {probability_cutoff}"
+    else:
+        subtitle = f"Method: {metagene_method} + KS"
+    fig.text(0.5, 0.98, subtitle, ha="center", fontsize=9, color="gray")
 
     ax_hist.legend(loc="upper right", fontsize=9)
 
@@ -762,15 +778,9 @@ def classify_by_threshold(
         )
         # Recompute probabilities for all cells if downsampled
         if sample_size < n_valid:
-            from sklearn.mixture import GaussianMixture
-
-            gmm = GaussianMixture(
-                n_components=n_components,
-                random_state=seed,
-                n_init=10,
-                covariance_type="full",
-            )
-            gmm.fit(sampled_scores.reshape(-1, 1))
+            # REUSE the fitted GMM model instead of fitting a new one
+            # This ensures threshold and probabilities are consistent
+            gmm = method_params["gmm_model"]
             high_component = method_params["high_component_idx"]
             posteriors_all = gmm.predict_proba(metagene_scores.reshape(-1, 1))
 
@@ -875,9 +885,10 @@ def classify_by_threshold(
             threshold=threshold,
             metagene_method=metagene_method,
             threshold_method=threshold_method,
-            column_prefix=column_prefix,
+            probability_cutoff=probability_cutoff,
             output_path=output_path,
             n_sample=n_sample_plot,
+            seed=seed,
         )
 
     return adata

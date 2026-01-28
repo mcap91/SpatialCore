@@ -425,10 +425,10 @@ def morans_i(
     spatial_key: str = "spatial",
     n_neighbors: int = 6,
     n_permutations: int = 10,
-    two_tailed: bool = True,
     seed: int = 0,
     key_added: str = "morans_i",
     copy: bool = False,
+    use_existing_graph: bool = False,
 ) -> ad.AnnData:
     """Compute Global Moran's I for spatial autocorrelation analysis.
 
@@ -455,16 +455,16 @@ def morans_i(
         Number of permutations for p-value computation. Default: 10.
         For publication-quality results, increase to 100+ (ideally 999).
         More permutations = more accurate p-values but slower computation.
-    two_tailed
-        If True, use two-tailed test. Default: True.
-        Note: squidpy uses two-tailed by default; this parameter is kept
-        for API compatibility but has no effect.
     seed
         Random seed for permutation testing. Default: 0.
     key_added
         Key to store results in adata.uns. Default: "morans_i".
     copy
         If True, operate on a copy of adata. Default: False.
+    use_existing_graph
+        If True, reuse existing spatial connectivity graph in adata.obsp
+        instead of rebuilding. Default: False (always rebuild to ensure
+        n_neighbors matches).
 
     Returns
     -------
@@ -554,15 +554,11 @@ def morans_i(
         f"k={n_neighbors}, permutations={n_permutations}"
     )
 
-    # Build spatial neighbors using squidpy if not already present
-    # or if n_neighbors differs from existing graph
+    # Build spatial neighbors using squidpy
     rebuild_graph = True
-    if "spatial_connectivities" in adata.obsp:
-        # Check if existing graph has same n_neighbors
-        existing_nnz_per_row = adata.obsp["spatial_connectivities"].nnz / n_cells
-        if abs(existing_nnz_per_row - n_neighbors) < 0.5:
-            rebuild_graph = False
-            logger.debug("Using existing spatial connectivity graph")
+    if use_existing_graph and "spatial_connectivities" in adata.obsp:
+        rebuild_graph = False
+        logger.info("Using existing spatial connectivity graph (use_existing_graph=True)")
 
     if rebuild_graph:
         logger.debug(f"Building spatial neighbors graph (k={n_neighbors})")
@@ -619,14 +615,10 @@ def morans_i(
                 "p_value": p_value,
             })
         else:
-            # Gene not in results (shouldn't happen, but handle gracefully)
-            results.append({
-                "gene": gene_name,
-                "I": 0.0,
-                "expected_I": expected_I,
-                "z_score": 0.0,
-                "p_value": 1.0,
-            })
+            raise RuntimeError(
+                f"Gene '{gene_name}' was passed to squidpy but not found in results. "
+                "This indicates an internal error in squidpy or data corruption."
+            )
 
     # Store results
     results_df = pd.DataFrame(results)
@@ -644,7 +636,7 @@ def morans_i(
             "n_genes": n_genes,
             "n_neighbors": n_neighbors,
             "n_permutations": n_permutations,
-            "two_tailed": two_tailed,
+            "use_existing_graph": use_existing_graph,
             "seed": seed,
             "backend": "squidpy",
         },
@@ -823,23 +815,18 @@ def local_morans_i(
     else:
         X_sparse = X.tocsc()
 
-    # Pre-compute gene statistics (sparse-friendly)
-    logger.debug("Pre-computing gene statistics")
-    gene_means = np.zeros(n_genes, dtype=np.float32)
-    gene_stds = np.zeros(n_genes, dtype=np.float32)
-
-    for batch_start in range(0, n_genes, batch_size):
-        batch_end = min(batch_start + batch_size, n_genes)
-        batch_indices = gene_indices[batch_start:batch_end]
-        X_batch = X_sparse[:, batch_indices].toarray()
-        gene_means[batch_start:batch_end] = X_batch.mean(axis=0)
-        gene_stds[batch_start:batch_end] = X_batch.std(axis=0)
+    # Pre-compute gene statistics using sparse-friendly operations (no densification)
+    logger.debug("Pre-computing gene statistics (sparse)")
+    X_genes = X_sparse[:, gene_indices]
+    gene_means = _compute_mean_sparse(X_genes).astype(np.float32)
+    gene_stds = _compute_std_sparse(X_genes).astype(np.float32)
 
     # Handle zero variance
     zero_var_mask = gene_stds == 0
     n_zero_var = zero_var_mask.sum()
+    zero_variance_genes = [gene_names[i] for i in np.where(zero_var_mask)[0]]
     if n_zero_var > 0:
-        logger.warning(f"{n_zero_var} genes have zero variance and will be skipped")
+        logger.warning(f"{n_zero_var} genes have zero variance and will be skipped: {zero_variance_genes[:5]}")
         gene_stds[zero_var_mask] = 1.0  # Avoid division by zero
 
     # Initialize result arrays
@@ -918,15 +905,25 @@ def local_morans_i(
         lag_values[:, zero_var_mask] = 0.0
         p_values[:, zero_var_mask] = 1.0
 
-    # Apply FDR correction (per gene)
-    logger.debug(f"Applying {fdr_correction} correction")
-    p_adj = np.ones_like(p_values)
-    for gene_idx in range(n_genes):
-        p_adj[:, gene_idx] = _apply_fdr_correction(p_values[:, gene_idx], fdr_correction)
+    # Apply FDR correction and classify quadrants
+    if n_permutations > 0:
+        # Apply FDR correction (per gene)
+        logger.debug(f"Applying {fdr_correction} correction")
+        p_adj = np.ones_like(p_values)
+        for gene_idx in range(n_genes):
+            p_adj[:, gene_idx] = _apply_fdr_correction(p_values[:, gene_idx], fdr_correction)
 
-    # Classify quadrants
-    logger.debug("Classifying LISA quadrants")
-    quadrants = _classify_quadrants(z_values, lag_values, p_adj, alpha)
+        # Classify quadrants with significance filtering
+        logger.debug("Classifying LISA quadrants (with significance filtering)")
+        quadrants = _classify_quadrants(z_values, lag_values, p_adj, alpha)
+    else:
+        # No permutations: classify by z/lag signs only, no significance filtering
+        logger.warning(
+            "n_permutations=0: Quadrants classified by z/lag signs only, "
+            "without significance filtering. Consider n_permutations>=99 for p-values."
+        )
+        p_adj = p_values  # All 1.0
+        quadrants = _classify_quadrants(z_values, lag_values, p_values=None, alpha=alpha)
 
     # Store results
     adata.obsm[f"{key_added}_I"] = local_I
@@ -949,6 +946,7 @@ def local_morans_i(
         "n_genes": n_genes,
         "seed": seed,
         "computation_time_seconds": elapsed,
+        "zero_variance_genes": zero_variance_genes,
     }
 
     # Log summary
@@ -1064,6 +1062,12 @@ def lees_l(
             "Spatial coordinates are required."
         )
 
+    if n_neighbors < 1:
+        raise ValueError(f"n_neighbors must be >= 1, got {n_neighbors}")
+
+    if n_permutations < 0:
+        raise ValueError(f"n_permutations must be >= 0, got {n_permutations}")
+
     # Normalize gene_pairs to list
     if isinstance(gene_pairs, tuple) and len(gene_pairs) == 2:
         if isinstance(gene_pairs[0], str):
@@ -1172,6 +1176,9 @@ def lees_l_local(
     spatial_key: str = "spatial",
     n_neighbors: int = 6,
     n_permutations: int = 199,
+    compute_cell_pvalues: bool = False,
+    significance_filter: bool = False,
+    alpha: float = 0.05,
     seed: int = 0,
     copy: bool = False,
 ) -> ad.AnnData:
@@ -1200,8 +1207,19 @@ def lees_l_local(
     n_neighbors
         Number of neighbors for spatial weights. Default: 6.
     n_permutations
-        Number of permutations for global p-value and per-cell p-values.
-        Default: 199. Set to 0 to skip permutation testing entirely.
+        Number of permutations for global p-value. Default: 199.
+        Set to 0 to skip permutation testing entirely.
+    compute_cell_pvalues
+        If True, compute per-cell p-values via permutation testing.
+        This is expensive (O(n_permutations * n_cells)) and usually
+        unnecessary unless significance_filter=True. Default: False.
+    significance_filter
+        If True, filter quadrant classifications by p-value significance.
+        Cells with p >= alpha are classified as NS. Requires
+        compute_cell_pvalues=True. Default: False.
+    alpha
+        Significance threshold for quadrant classification when
+        significance_filter=True. Default: 0.05.
     seed
         Random seed for permutation testing. Default: 0.
     copy
@@ -1213,7 +1231,7 @@ def lees_l_local(
         AnnData with results in:
         - adata.obs["{gene_x}_{gene_y}_lees_l"]: Local L values per cell
         - adata.obs["{gene_x}_{gene_y}_quadrant"]: HH/HL/LH/LL/NS classification
-        - adata.obs["{gene_x}_{gene_y}_pvalue"]: Per-cell p-values (if computed)
+        - adata.obs["{gene_x}_{gene_y}_pvalue"]: Per-cell p-values (if compute_cell_pvalues=True)
         - adata.uns["{gene_x}_{gene_y}_lees_l_params"]: Parameters and global L
 
     Raises
@@ -1262,6 +1280,17 @@ def lees_l_local(
         raise ValueError(
             f"adata.obsm['{spatial_key}'] not found. "
             "Spatial coordinates are required."
+        )
+
+    if n_neighbors < 1:
+        raise ValueError(f"n_neighbors must be >= 1, got {n_neighbors}")
+
+    if n_permutations < 0:
+        raise ValueError(f"n_permutations must be >= 0, got {n_permutations}")
+
+    if significance_filter and not compute_cell_pvalues:
+        raise ValueError(
+            "significance_filter=True requires compute_cell_pvalues=True"
         )
 
     # Handle all-pairs mode
@@ -1368,7 +1397,8 @@ def lees_l_local(
 
         # Compute per-cell p-values via permutation (optional, expensive)
         p_values = np.ones(n_cells, dtype=np.float32)
-        if n_permutations > 0:
+        if compute_cell_pvalues and n_permutations > 0:
+            logger.debug(f"Computing per-cell p-values ({n_permutations} permutations)")
             L_perm = np.zeros((n_permutations, n_cells), dtype=np.float32)
             for p in range(n_permutations):
                 z_y_perm = rng.permutation(z_y)
@@ -1381,10 +1411,17 @@ def lees_l_local(
             for i in range(n_cells):
                 extreme = np.sum(np.abs(L_perm[:, i]) >= np.abs(L_local[i]))
                 p_values[i] = (extreme + 1) / (n_permutations + 1)
+        elif compute_cell_pvalues and n_permutations == 0:
+            logger.warning("compute_cell_pvalues=True but n_permutations=0; p-values will be 1.0")
 
-        # Classify quadrants using z-score signs only (no p-value filtering)
-        # Following Lee (2001) and standard LISA approach
-        quadrants = _classify_quadrants(z_x, lag_z_y, p_values=None, alpha=0.05)
+        # Classify quadrants
+        if significance_filter:
+            # Filter by p-value significance (requires compute_cell_pvalues=True)
+            quadrants = _classify_quadrants(z_x, lag_z_y, p_values=p_values, alpha=alpha)
+        else:
+            # Classify by z-score signs only (no p-value filtering)
+            # Following Lee (2001) and standard LISA approach
+            quadrants = _classify_quadrants(z_x, lag_z_y, p_values=None, alpha=alpha)
 
         # Convert quadrant codes to labels
         quadrant_labels = [QUADRANT_LABELS[q] for q in quadrants]
@@ -1409,6 +1446,9 @@ def lees_l_local(
             "global_pvalue": global_pvalue,
             "n_neighbors": n_neighbors,
             "n_permutations": n_permutations,
+            "compute_cell_pvalues": compute_cell_pvalues,
+            "significance_filter": significance_filter,
+            "alpha": alpha,
             "quadrant_counts": quadrant_counts,
         }
 
@@ -1425,6 +1465,9 @@ def lees_l_local(
             "n_pairs": n_pairs,
             "n_neighbors": n_neighbors,
             "n_permutations": n_permutations,
+            "compute_cell_pvalues": compute_cell_pvalues,
+            "significance_filter": significance_filter,
+            "alpha": alpha,
             "seed": seed,
         },
         outputs={
