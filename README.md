@@ -109,7 +109,7 @@ spatialcore.print_info()
 | **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
 | **`spatialcore.annotation`** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
 | **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
-| **`spatialcore.nmf`** | 🔜 Coming soon | Spatial non-negative matrix factorization |
+| **`spatialcore.nmf`** | ✅ Available | Spatial non-negative matrix factorization (spaNMF) |
 | **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
 
 ---

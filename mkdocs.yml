@@ -52,6 +52,8 @@ nav:
   - Spatial Statistics:
     - "Overview": spatial/index.md
     - "Moran's I & Lee's L": spatial/spatial_stats.md
+  - NMF:
+    - "Spatial NMF": nmf/spanmf.md
   - Neighborhoods & Domains:
     - "Overview": domains/index.md
     - "Neighborhood Analysis": domains/neighborhood_analysis.md

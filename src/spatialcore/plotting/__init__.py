@@ -65,6 +65,13 @@ from spatialcore.plotting.benchmark import (
     plot_silhouette_by_type,
 )
 
+from spatialcore.plotting.nmf import (
+    plot_top_genes,
+    plot_gene_loading,
+    plot_component_spatial,
+    plot_component_correlation,
+)
+
 __all__ = [
     # Utils - Palettes
     "DEFAULT_PALETTE",
@@ -108,4 +115,9 @@ __all__ = [
     "plot_classification_report",
     "plot_agreement_heatmap",
     "plot_silhouette_by_type",
+    # NMF
+    "plot_top_genes",
+    "plot_gene_loading",
+    "plot_component_spatial",
+    "plot_component_correlation",
 ]

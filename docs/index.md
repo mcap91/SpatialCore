@@ -106,7 +106,7 @@ See the [Cell Typing documentation](celltyping/index.md) for detailed tutorials 
 | **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
 | **[`spatialcore.annotation`](celltyping/index.md)** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
 | **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
-| **`spatialcore.nmf`** | 🔜 Coming soon | Spatial non-negative matrix factorization |
+| **[`spatialcore.nmf`](nmf/spanmf.md)** | ✅ Available | Spatial non-negative matrix factorization (spaNMF) |
 | **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
 | **`spatialcore.r_bridge`** | 🔜 Coming soon | Seurat integration via subprocess |
 
