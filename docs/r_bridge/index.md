@@ -47,3 +47,40 @@ run the manual test:
 ```
 SPATIALCORE_MANUAL_R=1 python -m pytest tests/spatialcore_celltypist_test_suite/test_r_bridge.py -k sf_use_s2_windows_manual -v
 ```
+
+---
+
+## For R Users
+
+If you work primarily in R with Seurat objects, you can use all SpatialCore
+functions without switching to Python via reticulate.
+
+- [Using SpatialCore from R](r_integration.md) - Complete guide for R users
+- [Standalone Script](https://github.com/mcap91/SpatialCore/blob/main/docs/r_bridge/spatialcore_convert.R) - Copy-paste ready conversion functions
+
+### Quick Example
+
+```r
+library(Seurat)
+library(reticulate)
+use_condaenv("spatialcore")
+
+source("spatialcore_convert.R")
+
+# Convert Seurat -> AnnData
+adata <- seurat_to_adata(seurat_obj)
+
+# Use SpatialCore
+spc <- import("spatialcore")
+spc$spatial$compute_morans_i(adata)
+
+# Convert back
+seurat_obj <- adata_to_seurat(adata, seurat_obj)
+```
+
+### Requirements
+
+- R 4.0+
+- Seurat (v3, v4, or v5)
+- reticulate package
+- Python conda environment with spatialcore installed

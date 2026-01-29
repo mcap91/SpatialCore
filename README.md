@@ -20,6 +20,8 @@ SpatialCore serves as a package for computational biologists, by computational b
 ### The Goal
 To make spatial analysis engineering boring, so you can focus on the exciting biology. **Standardized. Scalable. Reproducible.**
 
+📖 **See the full documentation:** for modules, examples, and benchmarks [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
+
 ---
 
 ## 📦 Installation
@@ -96,8 +98,6 @@ spatialcore.print_info()
 # Available modules: core, annotation
 
 ```
-
-📖 **See the full documentation:** for modules, examples, and benchmarks [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
 
 
 ---

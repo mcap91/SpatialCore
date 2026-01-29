@@ -63,6 +63,7 @@ nav:
     - "Cell Classifier": thresholding/cell_classifier.md
   - R Bridge:
     - "Overview": r_bridge/index.md
+    - "R Integration": r_bridge/r_integration.md
 
 # Plugins
 plugins:

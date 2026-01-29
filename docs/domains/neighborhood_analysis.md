@@ -28,13 +28,13 @@ First, we define the "neighborhood" of each cell. SpatialCore supports both **k-
 
 ```python
 import scanpy as sc
-import spatialcore as sp
+import spatialcore as spc
 
 # Load data
 adata = sc.read_h5ad("liver_cancer.h5ad")
 
 # Compute neighborhood profiles (k=50)
-sp.spatial.compute_neighborhood_profile(
+spc.spatial.compute_neighborhood_profile(
     adata,
     celltype_column="cell_type",
     method="knn",
@@ -51,7 +51,7 @@ We then cluster these neighborhood vectors to find recurring patterns (niches).
 
 ```python
 # Identify 10 niche archetypes
-sp.spatial.identify_niches(
+spc.spatial.identify_niches(
     adata,
     n_niches=10,
     method="kmeans",
