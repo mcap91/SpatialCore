@@ -12,7 +12,7 @@
 ## 🎯 The Mission
 
 ### The Problem
-Tools for spatial biology analysis are fragmented. Implementations packages and complex functions often differ between languages (R vs Python) and even between packages, making reproducibility difficult and benchmarking impossible. We believe simple statistical tools solve many of the core problems of spatial biology, and we have desinged them to be intuative, easy to use, and scaleable for millions of cells. 
+Tools for spatial biology analysis are fragmented. Implementations and complex functions often differ between languages (R vs Python) and across packages, making reproducibility difficult and benchmarking impossible. We believe simple statistical tools solve many of the core problems of spatial biology, and we have desinged them to be intuative, easy to use, and scaleable for millions of cells. 
 
 ### The Solution
 SpatialCore serves as a package for computational biologists, by computational biologists. It provides robust, standardized implementations of core spatial statistics that ensure identical results across platforms, wrapping high-performance libraries where available.
