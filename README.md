@@ -22,6 +22,20 @@ To make spatial analysis engineering boring, so you can focus on the exciting bi
 
 📖 **See the full documentation:** for modules, examples, and benchmarks [mcap91.github.io/SpatialCore](https://mcap91.github.io/SpatialCore)
 
+
+## ⚖️ Philosophy
+
+*   **Reproducibility**: Same inputs = Same outputs. Period.
+*   **Scalability**: Built for the era of millions of cells (Xenium/CosMx).
+*   **Transparency**: Thin wrappers, not black boxes. We verify, we don't obfuscate.
+*   **Documentation**: Clear docstrings with academic references.
+
+**What we are NOT:**
+*   Inventing new methods, alogithims, or complex solutions. 
+*   Replacing Scanpy, Seurat, or other methods.
+
+---
+
 ---
 
 ## 📦 Installation
@@ -90,13 +104,31 @@ No manual configuration needed - it just works.
 ## 🚀 Quick Start
 
 ```python
+import scanpy as sc
 import spatialcore
 
 # Check what's available in your installation
 spatialcore.print_info()
-# SpatialCore v0.1.3
-# Available modules: core, annotation
+# SpatialCore v0.4.5
+# Available modules: core, annotation, nmf, r_bridge, spatial, ...
 
+# Load your spatial data
+adata = sc.read_h5ad("spatial_data.h5ad")
+
+# Spatial domain detection on B cells
+from spatialcore.spatial import make_spatial_domains
+from spatialcore.plotting import plot_domains
+
+adata = make_spatial_domains(
+    adata,
+    filter_expression="hieratype_ontology_name == 'B cell'",
+    output_column="bcell_domain",
+    domain_prefix="Bcell",
+    platform="cosmx",
+)
+
+# Visualize spatial domains
+plot_domains(adata, domain_col="bcell_domain", title="B Cell Domains")
 ```
 
 
@@ -106,10 +138,12 @@ spatialcore.print_info()
 
 | Module | Status | Features |
 |--------|--------|----------|
-| **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
 | **`spatialcore.annotation`** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
-| **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
 | **`spatialcore.nmf`** | ✅ Available | Spatial non-negative matrix factorization (spaNMF) |
+| **`spatialcore.spatial`** | ✅ Available | Moran's I, Lee's L, spatial autocorrelation |
+| **`spatialcore.domains`** | ✅ Available | Neighborhood profiling, niche identification, domain detection |
+| **`spatialcore.thresholding`** | ✅ Available | Cell classification, oncogene thresholding |
+| **`spatialcore.r_bridge`** | ✅ Available | Seurat integration, R interoperability via subprocess |
 | **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
 
 ---
@@ -136,20 +170,6 @@ SpatialCore is designed to play nice with others. It fits seamlessly into the ex
 
 ---
 
-## ⚖️ Philosophy
-
-This package is **for computational biologists, by computational biologists**.
-
-*   **Reproducibility**: Same inputs = Same outputs. Period.
-*   **Scalability**: Built for the era of millions of cells (Xenium/CosMx).
-*   **Transparency**: Thin wrappers, not black boxes. We verify, we don't obfuscate.
-*   **Documentation**: Clear docstrings with academic references.
-
-**What we are NOT:**
-*   Inventing new, unproven math.
-*   Replacing Scanpy, Seurat, or other methods.
-
----
 
 ## 📝 Citation
 

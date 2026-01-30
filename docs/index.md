@@ -21,7 +21,7 @@ This package is **for computational biologists, by computational biologists**.
 *   **Reproducibility**: Same inputs = Same outputs. Period.
 *   **Scalability**: Built for the era of millions of cells (Xenium/CosMx).
 *   **Transparency**: Thin wrappers, not black boxes. We verify, we don't obfuscate.
-*   **Scope**: We do **not** invent new math; we make existing math work reliably.
+*   **Scope**: We do **not** invent new methods, alogithims, or complex solutions; we make existing math work reliably.
 
 **Ecosystem Integration**{: .section-label }
 
@@ -52,24 +52,67 @@ We strictly define our spatial units to ensure clarity and alignment with establ
 
 ## 📦 Installation
 
+### Recommended: Conda/Mamba Environment
+
+For the best experience, we recommend using a conda or mamba environment:
+
 ```bash
+# Create environment with Python 3.11
+mamba create -n spatialcore python=3.11
+mamba activate spatialcore
+
+# Install SpatialCore
 pip install spatialcore
 ```
 
-**Optional Dependencies:**
+This installs all core Python dependencies including CellTypist for custom model training for cell type annotation.
 
+
+Run upgrade to get the latest modules, features, and fixes
 ```bash
-# For CellTypist automated annotation
-pip install spatialcore[celltypist]
+# Activate environment
+mamba activate spatialcore
 
-# For R/Seurat integration
-pip install spatialcore[r]
-
-# Install everything
-pip install spatialcore[all]
+# Upgrade
+pip install --upgrade spatialcore
 ```
 
+### R Requirements
+
+SpatialCore uses R for certain operations that are statistically optimized or perform better in R. The `r_bridge` module handles R integration via subprocess (no rpy2 required).
+
+**Install R packages in your environment:**
+
+```bash
+# If using conda/mamba (recommended)
+mamba install -c conda-forge r-base r-sf r-concaveman r-dplyr r-purrr r-jsonlite
+
+# If using system R (Linux/macOS)
+sudo apt-get install r-base  # Ubuntu/Debian
+R -e "install.packages(c('sf', 'concaveman', 'dplyr', 'purrr', 'jsonlite'), repos='https://cloud.r-project.org/')"
+```
+
+**Verify R is configured correctly:**
+
+```python
+from spatialcore.r_bridge import check_r_available, get_r_version
+print(check_r_available())  # True
+print(get_r_version())      # R version 4.x.x
+```
+
+### How r_bridge Works
+
+The `r_bridge` automatically detects your environment:
+
+| Environment | R Execution Method |
+|-------------|-------------------|
+| Conda/Mamba | `mamba run -n env_name Rscript ...` |
+| System R | `Rscript` directly |
+
+No manual configuration needed - it just works.
+
 ---
+
 
 ## 🚀 Quick Start
 
@@ -79,23 +122,29 @@ import spatialcore
 
 # Check what's available in your installation
 spatialcore.print_info()
-# SpatialCore v0.1.3
-# Available modules: core, annotation
+# SpatialCore v0.4.5
+# Available modules: core, annotation, nmf, r_bridge, spatial, ...
 
 # Load your spatial data
 adata = sc.read_h5ad("spatial_data.h5ad")
 
-# Cell type annotation with CellTypist
-from spatialcore.annotation import annotate_celltypist, train_celltypist_model
+# Spatial domain detection on B cells
+from spatialcore.spatial import make_spatial_domains
+from spatialcore.plotting import plot_domains
 
-# Annotate cells using CellTypist (auto-selects models based on tissue)
-adata = annotate_celltypist(adata, tissue="colon")
+adata = make_spatial_domains(
+    adata,
+    filter_expression="hieratype_ontology_name == 'B cell'",
+    output_column="bcell_domain",
+    domain_prefix="Bcell",
+    platform="cosmx",
+)
 
-# Train a custom model on your reference data
-model = train_celltypist_model(adata_reference, label_column="cell_type")
+# Visualize spatial domains
+plot_domains(adata, domain_col="bcell_domain", title="B Cell Domains")
 ```
 
-See the [Cell Typing documentation](celltyping/index.md) for detailed tutorials and API reference.
+See the [Domain Detection documentation](domains/domain_detection.md) for detailed tutorials and API reference.
 
 ---
 
@@ -103,12 +152,13 @@ See the [Cell Typing documentation](celltyping/index.md) for detailed tutorials 
 
 | Module | Status | Features |
 |--------|--------|----------|
-| **`spatialcore.core`** | ✅ Available | Logging, metadata tracking, caching utilities |
 | **[`spatialcore.annotation`](celltyping/index.md)** | ✅ Available | CellTypist wrappers, custom model training, benchmarking |
-| **`spatialcore.spatial`** | 🔜 Coming soon | Moran's I, Lee's L, neighborhoods, niches, domains |
 | **[`spatialcore.nmf`](nmf/spanmf.md)** | ✅ Available | Spatial non-negative matrix factorization (spaNMF) |
+| **[`spatialcore.spatial`](spatial/index.md)** | ✅ Available | Moran's I, Lee's L, spatial autocorrelation |
+| **[`spatialcore.domains`](domains/index.md)** | ✅ Available | Neighborhood profiling, niche identification, domain detection |
+| **[`spatialcore.thresholding`](thresholding/index.md)** | ✅ Available | Cell classification, oncogene thresholding |
+| **[`spatialcore.r_bridge`](r_bridge/index.md)** | ✅ Available | Seurat integration, R interoperability via subprocess |
 | **`spatialcore.diffusion`** | 🔜 Coming soon | Diffusion maps, pseudotime analysis |
-| **`spatialcore.r_bridge`** | 🔜 Coming soon | Seurat integration via subprocess |
 
 ---
 
