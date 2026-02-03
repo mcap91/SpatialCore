@@ -5,6 +5,16 @@
 # Internal functions for Seurat version compatibility and data conversion.
 # These are not exported; they are used by convert.R.
 #
+# Note: seurat_to_adata() now uses anndataR for conversion, so most R->Python
+# matrix conversion helpers are no longer needed. This file retains helpers for:
+# - Seurat version detection (.get_seurat_version, .is_assay5)
+# - BPCells detection (.check_bpcells)
+# - Seurat data setters (.set_assay_data) for adata_to_seurat
+# - Python->R matrix conversion (.from_python_matrix) for Python AnnData input
+# - Spatial detection (.detect_spatial_reduction)
+# - Validation utilities (.validate_names, .factors_to_character)
+# - Python dict key conversion (.py_keys_to_r)
+#
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -34,54 +44,6 @@
 #' @keywords internal
 .is_assay5 <- function(assay_obj) {
     inherits(assay_obj, "Assay5")
-}
-
-
-# ------------------------------------------------------------------------------
-# Seurat v3/v4 vs v5 Data Access
-# ------------------------------------------------------------------------------
-
-#' Get Assay Data (v3/v4/v5 Compatible)
-#'
-#' Handles the slot= (v3/v4) vs layer= (v5) API difference.
-#'
-#' @param seurat_obj Seurat object
-#' @param assay Character. Assay name.
-#' @param slot_name Character. One of "counts", "data", "scale.data"
-#'
-#' @return Sparse or dense matrix (genes x cells)
-#' @keywords internal
-.get_assay_data <- function(seurat_obj, assay, slot_name) {
-
-    assay_obj <- Seurat::GetAssay(seurat_obj, assay = assay)
-
-    if (.is_assay5(assay_obj)) {
-        # Seurat v5: use layer=
-        # Map slot names to v5 layer names
-        layer_name <- switch(
-            slot_name,
-            "counts" = "counts",
-            "data" = "data",
-            "scale.data" = "scale.data",
-            slot_name  # pass through if already a layer name
-        )
-
-        # Check if layer exists - fail loud if missing
-        available_layers <- SeuratObject::Layers(assay_obj)
-        if (!layer_name %in% available_layers) {
-            stop(
-                "Layer '", layer_name, "' not found in assay '", assay, "'.\n",
-                "Available layers: ", paste(available_layers, collapse = ", "), "\n",
-                "Ensure the required data slot exists before conversion."
-            )
-        }
-
-        return(Seurat::GetAssayData(seurat_obj, assay = assay, layer = layer_name))
-
-    } else {
-        # Seurat v3/v4: use slot=
-        return(Seurat::GetAssayData(seurat_obj, assay = assay, slot = slot_name))
-    }
 }
 
 
@@ -164,67 +126,10 @@
 
 
 # ------------------------------------------------------------------------------
-# Matrix Conversion: R to Python
-# ------------------------------------------------------------------------------
-
-#' Convert R Matrix to Python (cells x genes)
-#'
-#' Converts R matrix (genes x cells) to Python format (cells x genes).
-#' Handles both sparse (dgCMatrix) and dense matrices.
-#'
-#' @param mat_r R matrix (genes x cells)
-#' @param np numpy module (from reticulate)
-#' @param scipy_sparse scipy.sparse module (from reticulate)
-#'
-#' @return Python matrix (cells x genes)
-#' @keywords internal
-.to_python_matrix <- function(mat_r, np, scipy_sparse) {
-
-    # Transpose: genes x cells -> cells x genes
-    mat_r <- Matrix::t(mat_r)
-
-    if (inherits(mat_r, "dgCMatrix")) {
-        # Sparse matrix -> scipy.sparse.csr_matrix
-        # dgCMatrix is always CSC format in R, even after transpose
-        # We must convert to dgRMatrix (CSR) to extract correct CSR components
-
-        # Handle empty matrices
-        if (length(mat_r@x) == 0) {
-            shape <- reticulate::tuple(
-                as.integer(nrow(mat_r)),
-                as.integer(ncol(mat_r))
-            )
-            return(scipy_sparse$csr_matrix(shape, dtype = "float64"))
-        }
-
-        # Convert CSC (dgCMatrix) to CSR (dgRMatrix) for correct component extraction
-        mat_csr <- as(mat_r, "RsparseMatrix")
-
-        # Extract CSR components from dgRMatrix
-        # dgRMatrix: @j = column indices, @p = row pointers, @x = values
-        data <- np$array(as.numeric(mat_csr@x), dtype = "float64")
-        indices <- np$array(as.integer(mat_csr@j), dtype = "int32")
-        indptr <- np$array(as.integer(mat_csr@p), dtype = "int32")
-        shape <- reticulate::tuple(
-            as.integer(nrow(mat_csr)),
-            as.integer(ncol(mat_csr))
-        )
-
-        return(scipy_sparse$csr_matrix(
-            reticulate::tuple(data, indices, indptr),
-            shape = shape
-        ))
-
-    } else {
-        # Dense matrix -> numpy array
-        return(np$array(as.matrix(mat_r), dtype = "float64"))
-    }
-}
-
-
-# ------------------------------------------------------------------------------
 # Matrix Conversion: Python to R
 # ------------------------------------------------------------------------------
+# Note: R->Python matrix conversion (.to_python_matrix) has been removed
+# since seurat_to_adata() now uses anndataR which handles this internally.
 
 #' Convert Python Matrix to R (genes x cells)
 #'
@@ -336,37 +241,8 @@
 # ------------------------------------------------------------------------------
 # Data Validation Helpers
 # ------------------------------------------------------------------------------
-
-#' Check if Matrix Has Data
-#'
-#' Returns TRUE if matrix has non-zero dimensions and at least some data.
-#'
-#' @param mat Matrix (sparse or dense)
-#'
-#' @return Logical
-#' @keywords internal
-.has_data <- function(mat) {
-
-    if (is.null(mat)) {
-        return(FALSE)
-    }
-
-    if (nrow(mat) == 0 || ncol(mat) == 0) {
-        return(FALSE)
-    }
-
-    # For sparse matrices, check if any values
-    if (inherits(mat, "sparseMatrix")) {
-        # Works for dgCMatrix, dgRMatrix, dgTMatrix, etc.
-        return(length(mat@x) > 0)
-    }
-
-    # For dense matrices, check sum of absolute values (efficient, handles NA)
-    # Using sum(abs()) is O(n) but avoids creating boolean matrix like any()
-    mat_sum <- sum(abs(mat), na.rm = TRUE)
-    return(mat_sum > 0)
-}
-
+# Note: .has_data() has been removed since seurat_to_adata() now uses anndataR
+# which handles data validation internally.
 
 #' Validate Name Alignment
 #'
