@@ -82,5 +82,6 @@ seurat_obj <- adata_to_seurat(adata, seurat_obj)
 
 - R 4.0+
 - Seurat (v3, v4, or v5)
+- **anndataR** package (from Bioconductor)
 - reticulate package
 - Python conda environment with spatialcore installed

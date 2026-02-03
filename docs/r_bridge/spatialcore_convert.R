@@ -13,7 +13,7 @@
 #   seurat_obj <- adata_to_seurat(adata, seurat_obj)
 #
 # Requirements:
-#   R packages: reticulate, Matrix, Seurat
+#   R packages: anndataR (Bioconductor), reticulate, Matrix, Seurat
 #   Python packages: anndata, numpy, scipy, spatialcore (in conda env)
 #
 # Documentation: https://mcap91.github.io/SpatialCore/r_bridge/r_integration/
@@ -22,7 +22,7 @@
 
 
 # ------------------------------------------------------------------------------
-# Internal Helpers (with all Phase 1 & Phase 2 fixes applied)
+# Internal Helpers
 # ------------------------------------------------------------------------------
 
 .get_seurat_version <- function() {
@@ -35,23 +35,6 @@
 
 .is_assay5 <- function(assay_obj) {
     inherits(assay_obj, "Assay5")
-}
-
-.get_assay_data <- function(seurat_obj, assay, slot_name) {
-    assay_obj <- Seurat::GetAssay(seurat_obj, assay = assay)
-    if (.is_assay5(assay_obj)) {
-        layer_name <- switch(slot_name,
-            "counts" = "counts", "data" = "data", "scale.data" = "scale.data",
-            slot_name)
-        available_layers <- SeuratObject::Layers(assay_obj)
-        if (!layer_name %in% available_layers) {
-            stop("Layer '", layer_name, "' not found in assay '", assay, "'.\n",
-                 "Available layers: ", paste(available_layers, collapse = ", "), "\n",
-                 "Ensure the required data slot exists before conversion.")
-        }
-        return(Seurat::GetAssayData(seurat_obj, assay = assay, layer = layer_name))
-    }
-    Seurat::GetAssayData(seurat_obj, assay = assay, slot = slot_name)
 }
 
 .set_assay_data <- function(seurat_obj, assay, slot_name, new_data) {
@@ -69,7 +52,6 @@
     assay_obj <- Seurat::GetAssay(seurat_obj, assay = assay)
     if (!.is_assay5(assay_obj)) return(invisible(NULL))
     for (layer_name in SeuratObject::Layers(assay_obj)) {
-        # Let errors propagate (fail loud)
         layer_data <- SeuratObject::LayerData(assay_obj, layer = layer_name)
         if (inherits(layer_data, "IterableMatrix")) {
             stop("BPCells on-disk matrices (Seurat v5) are not yet supported.\n",
@@ -80,28 +62,7 @@
     invisible(NULL)
 }
 
-.to_python_matrix <- function(mat_r, np, scipy_sparse) {
-    mat_r <- Matrix::t(mat_r)
-    if (inherits(mat_r, "dgCMatrix")) {
-        if (length(mat_r@x) == 0) {
-            return(scipy_sparse$csr_matrix(
-                reticulate::tuple(as.integer(nrow(mat_r)), as.integer(ncol(mat_r))),
-                dtype = "float64"))
-        }
-        # Convert CSC (dgCMatrix) to CSR (RsparseMatrix) for correct component extraction
-        mat_csr <- as(mat_r, "RsparseMatrix")
-        return(scipy_sparse$csr_matrix(
-            reticulate::tuple(
-                np$array(as.numeric(mat_csr@x), dtype = "float64"),
-                np$array(as.integer(mat_csr@j), dtype = "int32"),
-                np$array(as.integer(mat_csr@p), dtype = "int32")),
-            shape = reticulate::tuple(as.integer(nrow(mat_csr)), as.integer(ncol(mat_csr)))))
-    }
-    np$array(as.matrix(mat_r), dtype = "float64")
-}
-
 .from_python_matrix <- function(mat_py, gene_names, cell_names) {
-    # Check ALL classes for sparse, not just the first one
     all_classes <- class(mat_py)
     is_sparse <- any(grepl("sparse", all_classes, ignore.case = TRUE))
     if (is_sparse) {
@@ -132,14 +93,6 @@
     NULL
 }
 
-.has_data <- function(mat) {
-    if (is.null(mat) || nrow(mat) == 0 || ncol(mat) == 0) return(FALSE)
-    # Check all sparse matrix types, not just dgCMatrix
-    if (inherits(mat, "sparseMatrix")) return(length(mat@x) > 0)
-    # For dense: use sum(abs()) which handles NA and is efficient
-    sum(abs(mat), na.rm = TRUE) > 0
-}
-
 .validate_names <- function(actual, expected, context) {
     if (!identical(actual, expected)) {
         if (length(actual) != length(expected)) {
@@ -159,40 +112,15 @@
     df
 }
 
-# Helper for graph conversion (cells x cells, no transpose needed)
-.graph_to_python <- function(graph_mat, np, scipy_sparse, n_cells) {
-    if (length(graph_mat@x) == 0) {
-        return(scipy_sparse$csr_matrix(
-            reticulate::tuple(as.integer(n_cells), as.integer(n_cells)),
-            dtype = "float64"))
-    }
-    mat_csr <- as(graph_mat, "RsparseMatrix")
-    scipy_sparse$csr_matrix(
-        reticulate::tuple(
-            np$array(as.numeric(mat_csr@x), dtype = "float64"),
-            np$array(as.integer(mat_csr@j), dtype = "int32"),
-            np$array(as.integer(mat_csr@p), dtype = "int32")),
-        shape = reticulate::tuple(as.integer(n_cells), as.integer(n_cells)))
-}
-
-# Helper for graph conversion from Python (cells x cells, no transpose)
-.graph_from_python <- function(graph_py, obs_names, n_cells) {
-    graph_csc <- graph_py$tocsc()
-    data <- as.numeric(reticulate::py_to_r(graph_csc$data))
-    indices <- as.integer(reticulate::py_to_r(graph_csc$indices))
-    indptr <- as.integer(reticulate::py_to_r(graph_csc$indptr))
-    graph_r <- Matrix::sparseMatrix(
-        i = indices + 1L, p = indptr, x = data,
-        dims = c(n_cells, n_cells),
-        dimnames = list(obs_names, obs_names))
-    as(graph_r, "dgCMatrix")
-}
-
-# Helper to convert Python dict_keys to R vector
-.py_keys_to_r <- function(keys_obj) {
+.py_keys_to_r <- function(py_dict_or_mapping) {
+    if (is.null(py_dict_or_mapping)) return(character(0))
+    if (!inherits(py_dict_or_mapping, "python.builtin.object")) return(character(0))
+    keys_obj <- py_dict_or_mapping$keys()
     if (is.null(keys_obj)) return(character(0))
     builtins <- reticulate::import_builtins()
-    reticulate::py_to_r(builtins$list(keys_obj))
+    result <- reticulate::py_to_r(builtins$list(keys_obj))
+    if (is.null(result) || length(result) == 0) return(character(0))
+    as.character(result)
 }
 
 
@@ -250,7 +178,7 @@ get_spatialcore <- function() {
 # Conversion Functions
 # ------------------------------------------------------------------------------
 
-#' Convert Seurat Object to AnnData
+#' Convert Seurat Object to AnnData (using anndataR)
 #'
 #' @param seurat_obj A Seurat object (v3, v4, or v5)
 #' @param assay Assay name. Default: DefaultAssay(seurat_obj)
@@ -262,7 +190,7 @@ get_spatialcore <- function() {
 #' @param graph_key_map Named vector mapping Seurat graph names to obsp keys
 #' @param spatial_key Override spatial reduction name (auto-detected if NULL)
 #'
-#' @return AnnData object (Python object via reticulate)
+#' @return AnnData object (R-based from anndataR)
 #' @export
 seurat_to_adata <- function(
     seurat_obj,
@@ -275,8 +203,17 @@ seurat_to_adata <- function(
     graph_key_map = NULL,
     spatial_key = NULL
 ) {
-    if (!requireNamespace("reticulate", quietly = TRUE)) stop("Package 'reticulate' required.")
-    if (!reticulate::py_available()) stop("Python not available. Run setup_spatialcore() first.")
+    # Check anndataR
+    if (!requireNamespace("anndataR", quietly = TRUE)) {
+        stop(
+            "Package 'anndataR' is required but not installed.\n",
+            "Install from Bioconductor with:\n",
+            "  if (!require('BiocManager', quietly = TRUE))\n",
+            "      install.packages('BiocManager')\n",
+            "  BiocManager::install('anndataR')"
+        )
+    }
+
     if (!inherits(seurat_obj, "Seurat")) stop("Expected Seurat object, got: ", class(seurat_obj)[1])
 
     if (is.null(assay)) assay <- Seurat::DefaultAssay(seurat_obj)
@@ -286,152 +223,102 @@ seurat_to_adata <- function(
     x_slot <- match.arg(x_slot)
     .check_bpcells(seurat_obj, assay)
 
-    anndata <- reticulate::import("anndata", convert = FALSE)
-    np <- reticulate::import("numpy", convert = FALSE)
-    scipy_sparse <- reticulate::import("scipy.sparse", convert = FALSE)
-
-    x_data_r <- .get_assay_data(seurat_obj, assay, x_slot)
-    if (!.has_data(x_data_r)) stop("No data in '", x_slot, "' slot for assay '", assay, "'.")
-    X_py <- .to_python_matrix(x_data_r, np, scipy_sparse)
-
-    layers <- list()
+    # Build layers_mapping for anndataR
+    layers_mapping <- NULL
     if (include_counts && x_slot == "data") {
-        counts_r <- tryCatch(
-            .get_assay_data(seurat_obj, assay, "counts"),
-            error = function(e) NULL
-        )
-        if (!is.null(counts_r) && .has_data(counts_r)) {
-            layers[["counts"]] <- .to_python_matrix(counts_r, np, scipy_sparse)
-        } else {
-            warning("Raw counts not available in assay '", assay, "'.\n",
-                    "layers['counts'] will not be created.")
-        }
+        layers_mapping <- c("counts")
     }
     if (include_scale) {
-        scale_r <- tryCatch(
-            .get_assay_data(seurat_obj, assay, "scale.data"),
-            error = function(e) NULL
-        )
-        if (!is.null(scale_r) && .has_data(scale_r)) {
-            full_genes <- rownames(Seurat::GetAssay(seurat_obj, assay = assay))
-            if (identical(rownames(scale_r), full_genes)) {
-                layers[["scale"]] <- .to_python_matrix(scale_r, np, scipy_sparse)
-            } else {
-                warning("scale.data does not cover all features (", nrow(scale_r),
-                        " vs ", length(full_genes), "). layers['scale'] not created.")
-            }
-        } else {
-            warning("include_scale=TRUE but scale.data is empty in assay '", assay, "'.")
-        }
+        layers_mapping <- c(layers_mapping, "scale.data")
     }
 
-    obs_df <- .factors_to_character(seurat_obj[[]])
-    cell_names <- colnames(seurat_obj)
-    rownames(obs_df) <- cell_names
+    # Core conversion via anndataR
+    adata <- anndataR::as_AnnData(
+        seurat_obj,
+        assay_name = assay,
+        x_mapping = x_slot,
+        layers_mapping = layers_mapping,
+        obs_mapping = TRUE,
+        var_mapping = TRUE,
+        obsm_mapping = include_reductions,
+        obsp_mapping = include_graphs,
+        uns_mapping = TRUE
+    )
 
-    assay_obj <- Seurat::GetAssay(seurat_obj, assay = assay)
-    var_df <- .factors_to_character(assay_obj[[]])
-    gene_names <- rownames(assay_obj)
-    rownames(var_df) <- gene_names
+    # Post-processing: Add SpatialCore-specific uns fields
+    adata$uns[["X_slot"]] <- x_slot
+    adata$uns[["seurat_assay"]] <- assay
+    adata$uns[["seurat_project"]] <- seurat_obj@project.name
+    adata$uns[["conversion"]] <- list(
+        source = "seurat_to_adata",
+        backend = "anndataR",
+        seurat_version = as.character(packageVersion("Seurat")),
+        anndataR_version = as.character(packageVersion("anndataR")),
+        r_version = as.character(getRversion()),
+        timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    )
 
-    obsm <- list()
-    varm <- list()
-    n_cells <- length(cell_names)
-    if (include_reductions && length(seurat_obj@reductions) > 0) {
-        for (red_name in names(seurat_obj@reductions)) {
-            red <- seurat_obj@reductions[[red_name]]
-            emb <- red@cell.embeddings
-            if (nrow(emb) == 0) {
-                warning("Reduction '", red_name, "' has no cell embeddings. Skipping.")
-                next
-            }
-            obsm_key <- switch(tolower(red_name),
-                "pca" = "X_pca", "umap" = "X_umap", "tsne" = "X_tsne",
-                "spatial" = "spatial", "sp" = "spatial", paste0("X_", red_name))
-            if (obsm_key %in% names(obsm)) {
-                stop("obsm key collision: '", obsm_key, "' already exists.")
-            }
-            obsm[[obsm_key]] <- np$array(emb, dtype = "float64")
-            if (!is.null(red@feature.loadings) && nrow(red@feature.loadings) > 0) {
-                if (identical(rownames(red@feature.loadings), gene_names)) {
-                    varm_key <- if (tolower(red_name) == "pca") "PCs" else paste0(red_name, "_loadings")
-                    if (!varm_key %in% names(varm)) varm[[varm_key]] <- np$array(as.matrix(red@feature.loadings), dtype = "float64")
-                } else {
-                    warning("Reduction '", red_name, "' loadings do not cover all genes. Skipping varm.")
-                }
-            }
-        }
+    if (!is.null(graph_key_map)) {
+        adata$uns[["graph_key_map"]] <- as.list(graph_key_map)
     }
-    if (!is.null(spatial_key) && spatial_key %in% names(seurat_obj@reductions)) {
-        obsm[["spatial"]] <- np$array(seurat_obj@reductions[[spatial_key]]@cell.embeddings, dtype = "float64")
-    } else if (!"spatial" %in% names(obsm)) {
+    if (length(seurat_obj@misc) > 0) {
+        adata$uns[["seurat_misc"]] <- seurat_obj@misc
+    }
+
+    # Handle spatial_key override
+    if (!is.null(spatial_key)) {
+        if (!spatial_key %in% names(seurat_obj@reductions)) {
+            stop("Spatial reduction '", spatial_key, "' not found.\n",
+                 "Available reductions: ", paste(names(seurat_obj@reductions), collapse = ", "))
+        }
+        red <- seurat_obj@reductions[[spatial_key]]
+        adata$obsm[["spatial"]] <- red@cell.embeddings
+    }
+
+    # Auto-detect spatial if not already present
+    obsm_keys <- names(adata$obsm)
+    if (!"spatial" %in% obsm_keys) {
         detected <- .detect_spatial_reduction(seurat_obj)
-        if (!is.null(detected)) obsm[["spatial"]] <- np$array(seurat_obj@reductions[[detected]]@cell.embeddings, dtype = "float64")
-    }
-
-    obsp <- list()
-    if (include_graphs && length(seurat_obj@graphs) > 0) {
-        graph_names <- names(seurat_obj@graphs)
-        nn_matches <- grep("_nn$", graph_names, value = TRUE)
-        snn_matches <- grep("_snn$", graph_names, value = TRUE)
-        if ((length(nn_matches) > 1 || length(snn_matches) > 1) && is.null(graph_key_map)) {
-            stop("Multiple graphs match _nn/_snn. Provide graph_key_map to disambiguate.\n",
-                 "  _nn graphs: ", paste(nn_matches, collapse = ", "), "\n",
-                 "  _snn graphs: ", paste(snn_matches, collapse = ", "))
-        }
-        for (gname in graph_names) {
-            graph <- seurat_obj@graphs[[gname]]
-            if (!inherits(graph, "Graph")) {
-                warning("Graph '", gname, "' is not a Seurat Graph object. Skipping.")
-                next
-            }
-            if (!is.null(graph_key_map) && gname %in% names(graph_key_map)) {
-                obsp_key <- graph_key_map[[gname]]
-            } else if (gname %in% nn_matches && length(nn_matches) == 1) {
-                obsp_key <- "connectivities"
-            } else if (gname %in% snn_matches && length(snn_matches) == 1) {
-                obsp_key <- "distances"
-            } else {
-                obsp_key <- gname
-            }
-            if (obsp_key %in% names(obsp)) {
-                stop("obsp key collision: '", obsp_key, "' already exists.")
-            }
-            graph_mat <- as(graph, "dgCMatrix")
-            if (nrow(graph_mat) != n_cells || ncol(graph_mat) != n_cells) {
-                stop("Graph '", gname, "' dimensions do not match cell count.")
-            }
-            # Use graph-specific converter (no transpose for square cell x cell)
-            obsp[[obsp_key]] <- .graph_to_python(graph_mat, np, scipy_sparse, n_cells)
+        if (!is.null(detected) && detected %in% names(seurat_obj@reductions)) {
+            red <- seurat_obj@reductions[[detected]]
+            adata$obsm[["spatial"]] <- red@cell.embeddings
         }
     }
 
-    uns <- list(
-        "X_slot" = x_slot,
-        "seurat_assay" = assay,
-        "seurat_project" = seurat_obj@project.name,
-        "conversion" = list(source = "seurat_to_adata", timestamp = format(Sys.time()))
-    )
-    if (!is.null(graph_key_map)) uns[["graph_key_map"]] <- as.list(graph_key_map)
-    if (length(seurat_obj@misc) > 0) uns[["seurat_misc"]] <- seurat_obj@misc
+    # Handle graph_key_map renaming
+    if (!is.null(graph_key_map) && include_graphs) {
+        obsp_keys <- names(adata$obsp)
+        for (old_key in names(graph_key_map)) {
+            new_key <- graph_key_map[[old_key]]
+            if (old_key %in% obsp_keys && old_key != new_key) {
+                adata$obsp[[new_key]] <- adata$obsp[[old_key]]
+                adata$obsp[[old_key]] <- NULL
+            }
+        }
+    }
 
-    adata <- anndata$AnnData(
-        X = X_py, obs = obs_df, var = var_df,
-        layers = if (length(layers) > 0) reticulate::r_to_py(layers) else NULL,
-        obsm = if (length(obsm) > 0) reticulate::r_to_py(obsm) else NULL,
-        obsp = if (length(obsp) > 0) reticulate::r_to_py(obsp) else NULL,
-        varm = if (length(varm) > 0) reticulate::r_to_py(varm) else NULL,
-        uns = reticulate::r_to_py(uns)
-    )
+    # Get dimensions - anndataR uses methods, not properties
+    n_cells <- nrow(adata$obs)
+    n_genes <- nrow(adata$var)
+    layer_keys <- names(adata$layers)
+    obsm_keys <- names(adata$obsm)
+    obsp_keys <- names(adata$obsp)
 
-    message("Converted: ", length(cell_names), " cells, ", length(gene_names), " genes")
+    message("Converted Seurat to AnnData (via anndataR):\n",
+            "  Cells: ", n_cells, "\n",
+            "  Genes: ", n_genes, "\n",
+            "  X contains: ", x_slot, "\n",
+            "  Layers: ", ifelse(length(layer_keys) > 0, paste(layer_keys, collapse = ", "), "none"), "\n",
+            "  Reductions: ", ifelse(length(obsm_keys) > 0, paste(obsm_keys, collapse = ", "), "none"), "\n",
+            "  Graphs: ", ifelse(length(obsp_keys) > 0, paste(obsp_keys, collapse = ", "), "none"))
+
     adata
 }
 
 
 #' Convert AnnData to Seurat Object
 #'
-#' @param adata AnnData object (Python object via reticulate)
+#' @param adata AnnData object (R-based from anndataR or Python via reticulate)
 #' @param seurat_obj Optional existing Seurat object to merge into
 #' @param assay Assay name for new Seurat object
 #' @param project Project name for new Seurat object
@@ -444,51 +331,149 @@ adata_to_seurat <- function(
     assay = "RNA",
     project = "SpatialCore"
 ) {
-    if (!requireNamespace("reticulate", quietly = TRUE)) stop("Package 'reticulate' required.")
-    if (!reticulate::py_available()) stop("Python not available.")
-    if (!inherits(adata, "python.builtin.object")) stop("Expected Python AnnData object.")
+    # Detect AnnData type
+    is_r_anndata <- inherits(adata, "AnnData") || inherits(adata, "AbstractAnnData")
+    is_py_anndata <- inherits(adata, "python.builtin.object")
 
-    obs_names <- reticulate::py_to_r(adata$obs_names$tolist())
-    var_names <- reticulate::py_to_r(adata$var_names$tolist())
-    n_cells <- length(obs_names)
-    n_genes <- length(var_names)
-
-    # Get X slot semantics - REQUIRED for safe conversion
-    x_slot <- NULL
-    if (!is.null(adata$uns)) {
-        x_slot_val <- reticulate::py_to_r(adata$uns$get("X_slot"))
-        if (!is.null(x_slot_val)) x_slot <- x_slot_val
-    }
-    if (is.null(x_slot)) {
-        stop("adata.uns['X_slot'] not found.\n",
-             "Cannot safely determine if X contains 'data' or 'counts'.\n",
-             "Set adata.uns['X_slot'] = 'data' or 'counts' before conversion.")
-    }
-    if (!x_slot %in% c("data", "counts")) {
-        stop("Invalid adata.uns['X_slot'] value: '", x_slot, "'. Expected 'data' or 'counts'.")
+    if (!is_r_anndata && !is_py_anndata) {
+        stop("Expected an AnnData object, got R class: ", class(adata)[1], "\n",
+             "Provide an anndataR AnnData or Python anndata.AnnData object.")
     }
 
-    if (is.null(adata$X)) stop("adata.X is empty.")
-    X_r <- .from_python_matrix(adata$X, var_names, obs_names)
+    # Extract data based on AnnData type
+    if (is_r_anndata) {
+        obs_names <- rownames(adata$obs)
+        var_names <- rownames(adata$var)
+        n_cells <- length(obs_names)
+        n_genes <- length(var_names)
 
-    # Get layers safely using .py_keys_to_r helper
-    layer_keys <- character(0)
-    if (!is.null(adata$layers) && length(reticulate::py_to_r(adata$layers)) > 0) {
-        layer_keys <- .py_keys_to_r(adata$layers$keys())
-    }
-    counts_r <- NULL
-    data_r <- NULL
-    if (length(layer_keys) > 0 && "counts" %in% layer_keys) {
-        counts_r <- .from_python_matrix(adata$layers[["counts"]], var_names, obs_names)
+        x_slot <- adata$uns[["X_slot"]]
+        if (is.null(x_slot)) {
+            stop("adata$uns['X_slot'] not found.\n",
+                 "Cannot safely determine if X contains 'data' or 'counts'.\n",
+                 "Set adata$uns['X_slot'] <- 'data' or 'counts' before conversion.")
+        }
+        if (!x_slot %in% c("data", "counts")) {
+            stop("Invalid adata$uns['X_slot'] value: '", x_slot, "'. Expected 'data' or 'counts'.")
+        }
+
+        X_r <- adata$X
+        if (is.null(X_r)) stop("adata$X is NULL or empty.")
+        X_r <- Matrix::t(X_r)
+        rownames(X_r) <- var_names
+        colnames(X_r) <- obs_names
+
+        layer_keys <- names(adata$layers)
+        counts_r <- NULL
+        data_r <- NULL
+        scale_r <- NULL
+
+        if (!is.null(layer_keys) && length(layer_keys) > 0) {
+            if ("counts" %in% layer_keys) {
+                counts_r <- Matrix::t(adata$layers[["counts"]])
+                rownames(counts_r) <- var_names
+                colnames(counts_r) <- obs_names
+            }
+            if ("data" %in% layer_keys) {
+                data_r <- Matrix::t(adata$layers[["data"]])
+                rownames(data_r) <- var_names
+                colnames(data_r) <- obs_names
+            }
+            if ("scale" %in% layer_keys || "scale.data" %in% layer_keys) {
+                scale_key <- if ("scale" %in% layer_keys) "scale" else "scale.data"
+                scale_r <- Matrix::t(adata$layers[[scale_key]])
+                rownames(scale_r) <- var_names
+                colnames(scale_r) <- obs_names
+            }
+        }
+
+        obs_df <- adata$obs
+        var_df <- adata$var
+        obsm_keys <- names(adata$obsm)
+        obsm_data <- adata$obsm
+        varm_keys <- names(adata$varm)
+        varm_data <- adata$varm
+        obsp_keys <- names(adata$obsp)
+        obsp_data <- adata$obsp
+
+    } else {
+        # Python-based AnnData
+        if (!requireNamespace("reticulate", quietly = TRUE)) {
+            stop("Package 'reticulate' is required for Python AnnData objects.")
+        }
+        if (!reticulate::py_available()) {
+            stop("Python is not available. Configure reticulate first.")
+        }
+
+        adata_class <- class(adata)[1]
+        if (!grepl("AnnData", adata_class, ignore.case = TRUE)) {
+            stop("Expected an AnnData object, got: ", adata_class)
+        }
+
+        obs_names <- reticulate::py_to_r(adata$obs_names$tolist())
+        var_names <- reticulate::py_to_r(adata$var_names$tolist())
+        n_cells <- length(obs_names)
+        n_genes <- length(var_names)
+
+        x_slot <- NULL
+        if (!is.null(adata$uns)) {
+            x_slot_val <- reticulate::py_to_r(adata$uns$get("X_slot"))
+            if (!is.null(x_slot_val)) x_slot <- x_slot_val
+        }
+        if (is.null(x_slot)) {
+            stop("adata.uns['X_slot'] not found.\n",
+                 "Cannot safely determine if X contains 'data' or 'counts'.\n",
+                 "Set adata.uns['X_slot'] = 'data' or 'counts' before conversion.")
+        }
+        if (!x_slot %in% c("data", "counts")) {
+            stop("Invalid adata.uns['X_slot'] value: '", x_slot, "'. Expected 'data' or 'counts'.")
+        }
+
+        if (is.null(adata$X)) stop("adata.X is empty.")
+        x_shape <- reticulate::py_to_r(adata$X$shape)
+        if (x_shape[1] != n_cells || x_shape[2] != n_genes) {
+            stop("adata.X shape does not match obs/var dimensions.")
+        }
+
+        X_r <- .from_python_matrix(adata$X, var_names, obs_names)
+
+        layer_keys <- .py_keys_to_r(adata$layers)
+        counts_r <- NULL
+        data_r <- NULL
+        scale_r <- NULL
+
+        if (!is.null(layer_keys) && length(layer_keys) > 0) {
+            if ("counts" %in% layer_keys) {
+                counts_r <- .from_python_matrix(adata$layers[["counts"]], var_names, obs_names)
+            }
+            if ("data" %in% layer_keys) {
+                data_r <- .from_python_matrix(adata$layers[["data"]], var_names, obs_names)
+            }
+            if ("scale" %in% layer_keys) {
+                scale_r <- .from_python_matrix(adata$layers[["scale"]], var_names, obs_names)
+            }
+        }
+
+        obs_df <- reticulate::py_to_r(adata$obs)
+        if (is.null(rownames(obs_df))) rownames(obs_df) <- obs_names
+        var_df <- reticulate::py_to_r(adata$var)
+        if (is.null(rownames(var_df))) rownames(var_df) <- var_names
+
+        obsm_keys <- .py_keys_to_r(adata$obsm)
+        obsm_data <- adata$obsm
+        varm_keys <- .py_keys_to_r(adata$varm)
+        varm_data <- adata$varm
+        obsp_keys <- .py_keys_to_r(adata$obsp)
+        obsp_data <- adata$obsp
     }
 
+    # Assign X based on x_slot
     if (x_slot == "counts") {
         if (is.null(counts_r)) counts_r <- X_r
     } else {
-        data_r <- X_r
+        if (is.null(data_r)) data_r <- X_r
     }
 
-    # Ensure we have counts - REQUIRED for Seurat
     if (is.null(counts_r)) {
         stop("No raw counts found for Seurat object creation.\n",
              "  - adata.uns['X_slot'] = '", x_slot, "' (so X is not counts)\n",
@@ -496,34 +481,49 @@ adata_to_seurat <- function(
              "To fix: set adata.layers['counts'] or adata.uns['X_slot'] = 'counts'")
     }
 
-    obs_df <- reticulate::py_to_r(adata$obs)
-    rownames(obs_df) <- obs_names
-    var_df <- reticulate::py_to_r(adata$var)
-    rownames(var_df) <- var_names
+    if (is.null(rownames(obs_df))) rownames(obs_df) <- obs_names
+    if (is.null(rownames(var_df))) rownames(var_df) <- var_names
 
+    # Create or merge Seurat object
     if (is.null(seurat_obj)) {
         seurat_obj <- Seurat::CreateSeuratObject(counts = counts_r, project = project, assay = assay, meta.data = obs_df)
         if (!is.null(data_r)) seurat_obj <- .set_assay_data(seurat_obj, assay, "data", data_r)
+        if (!is.null(scale_r)) {
+            if (identical(rownames(scale_r), var_names) && identical(colnames(scale_r), obs_names)) {
+                seurat_obj <- .set_assay_data(seurat_obj, assay, "scale.data", scale_r)
+            }
+        }
+        if (ncol(var_df) > 0) {
+            assay_obj <- Seurat::GetAssay(seurat_obj, assay = assay)
+            if (identical(rownames(var_df), rownames(assay_obj))) {
+                assay_obj[[names(var_df)]] <- var_df
+                seurat_obj[[assay]] <- assay_obj
+            }
+        }
     } else {
         if (!inherits(seurat_obj, "Seurat")) stop("seurat_obj must be a Seurat object.")
         .validate_names(obs_names, colnames(seurat_obj), "Cell names")
         .validate_names(var_names, rownames(Seurat::GetAssay(seurat_obj, assay = assay)), "Gene names")
         for (col in colnames(obs_df)) seurat_obj[[col]] <- obs_df[[col]]
         if (!is.null(data_r)) seurat_obj <- .set_assay_data(seurat_obj, assay, "data", data_r)
+        if (!is.null(scale_r)) {
+            seurat_genes <- rownames(Seurat::GetAssay(seurat_obj, assay = assay))
+            seurat_cells <- colnames(seurat_obj)
+            if (identical(rownames(scale_r), seurat_genes) && identical(colnames(scale_r), seurat_cells)) {
+                seurat_obj <- .set_assay_data(seurat_obj, assay, "scale.data", scale_r)
+            }
+        }
     }
 
-    # Get obsm keys safely using .py_keys_to_r helper
-    obsm_keys <- character(0)
-    if (!is.null(adata$obsm) && length(reticulate::py_to_r(adata$obsm)) > 0) {
-        obsm_keys <- .py_keys_to_r(adata$obsm$keys())
-    }
-    if (length(obsm_keys) > 0) {
+    # Add reductions
+    if (!is.null(obsm_keys) && length(obsm_keys) > 0) {
         for (obsm_key in obsm_keys) {
-            emb <- reticulate::py_to_r(adata$obsm[[obsm_key]])
-            if (nrow(emb) != n_cells) {
-                warning("obsm['", obsm_key, "'] has ", nrow(emb), " rows but ", n_cells, " expected. Skipping.")
-                next
+            if (is_r_anndata) {
+                emb <- obsm_data[[obsm_key]]
+            } else {
+                emb <- reticulate::py_to_r(obsm_data[[obsm_key]])
             }
+            if (nrow(emb) != n_cells) next
             red_name <- switch(obsm_key, "X_pca" = "pca", "X_umap" = "umap", "X_tsne" = "tsne", "spatial" = "spatial", gsub("^X_", "", obsm_key))
             key <- switch(red_name, "pca" = "PC_", "umap" = "UMAP_", "tsne" = "tSNE_", "spatial" = "Spatial_", paste0(toupper(substr(red_name, 1, 1)), "_"))
             rownames(emb) <- colnames(seurat_obj)
@@ -532,49 +532,56 @@ adata_to_seurat <- function(
         }
     }
 
-    # Get varm keys safely using .py_keys_to_r helper
-    varm_keys <- character(0)
-    if (!is.null(adata$varm) && length(reticulate::py_to_r(adata$varm)) > 0) {
-        varm_keys <- .py_keys_to_r(adata$varm$keys())
-    }
-    if (length(varm_keys) > 0) {
+    # Add feature loadings
+    if (!is.null(varm_keys) && length(varm_keys) > 0) {
         for (varm_key in varm_keys) {
-            loadings <- reticulate::py_to_r(adata$varm[[varm_key]])
+            if (is_r_anndata) {
+                loadings <- varm_data[[varm_key]]
+            } else {
+                loadings <- reticulate::py_to_r(varm_data[[varm_key]])
+            }
             red_name <- switch(varm_key, "PCs" = "pca", gsub("_loadings$", "", varm_key))
-            if (!red_name %in% names(seurat_obj@reductions)) {
-                warning("varm['", varm_key, "'] maps to reduction '", red_name, "' which does not exist. Skipping.")
-                next
-            }
-            if (nrow(loadings) != n_genes) {
-                warning("varm['", varm_key, "'] has ", nrow(loadings), " rows but ", n_genes, " expected. Skipping.")
-                next
-            }
+            if (!red_name %in% names(seurat_obj@reductions)) next
+            if (nrow(loadings) != n_genes) next
             rownames(loadings) <- rownames(Seurat::GetAssay(seurat_obj, assay = assay))
             seurat_obj[[red_name]]@feature.loadings <- loadings
         }
     }
 
-    # Get obsp keys safely using .py_keys_to_r helper
-    obsp_keys <- character(0)
-    if (!is.null(adata$obsp) && length(reticulate::py_to_r(adata$obsp)) > 0) {
-        obsp_keys <- .py_keys_to_r(adata$obsp$keys())
-    }
-    if (length(obsp_keys) > 0) {
+    # Add graphs
+    if (!is.null(obsp_keys) && length(obsp_keys) > 0) {
         for (obsp_key in obsp_keys) {
-            graph_py <- adata$obsp[[obsp_key]]
-            graph_shape <- reticulate::py_to_r(graph_py$shape)
-            if (graph_shape[1] != n_cells || graph_shape[2] != n_cells) {
-                warning("obsp['", obsp_key, "'] shape does not match n_cells. Skipping.")
-                next
+            if (is_r_anndata) {
+                graph_r <- obsp_data[[obsp_key]]
+                if (nrow(graph_r) != n_cells || ncol(graph_r) != n_cells) next
+                if (!inherits(graph_r, "dgCMatrix")) graph_r <- as(graph_r, "dgCMatrix")
+                rownames(graph_r) <- obs_names
+                colnames(graph_r) <- obs_names
+            } else {
+                graph_py <- obsp_data[[obsp_key]]
+                graph_shape <- reticulate::py_to_r(graph_py$shape)
+                if (graph_shape[1] != n_cells || graph_shape[2] != n_cells) next
+                graph_csc <- graph_py$tocsc()
+                graph_r <- Matrix::sparseMatrix(
+                    i = as.integer(reticulate::py_to_r(graph_csc$indices)) + 1L,
+                    p = as.integer(reticulate::py_to_r(graph_csc$indptr)),
+                    x = as.numeric(reticulate::py_to_r(graph_csc$data)),
+                    dims = c(n_cells, n_cells),
+                    dimnames = list(obs_names, obs_names))
+                graph_r <- as(graph_r, "dgCMatrix")
             }
-            # Use graph-specific converter (no transpose for square cell x cell)
-            graph_r <- .graph_from_python(graph_py, obs_names, n_cells)
             graph_name <- switch(obsp_key, "connectivities" = paste0(assay, "_nn"), "distances" = paste0(assay, "_snn"), obsp_key)
             seurat_obj@graphs[[graph_name]] <- as(graph_r, "Graph")
         }
     }
 
-    message("Converted: ", ncol(seurat_obj), " cells, ", nrow(seurat_obj), " genes")
+    message("Converted AnnData to Seurat:\n",
+            "  Cells: ", ncol(seurat_obj), "\n",
+            "  Genes: ", nrow(seurat_obj), "\n",
+            "  Metadata columns: ", ncol(seurat_obj[[]]), "\n",
+            "  Reductions: ", paste(names(seurat_obj@reductions), collapse = ", "), "\n",
+            "  Graphs: ", paste(names(seurat_obj@graphs), collapse = ", "))
+
     seurat_obj
 }
 

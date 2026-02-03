@@ -46,6 +46,12 @@ DimPlot(seurat_obj, group.by = "leiden")
 ### Step 1: Install R Packages
 
 ```r
+# Install from Bioconductor (required for Seurat <-> AnnData conversion)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("anndataR")
+
+# Install other dependencies
 install.packages(c("reticulate", "Matrix", "Seurat"))
 ```
 
