@@ -19,6 +19,7 @@ from spatialcore.spatial.autocorrelation import (
 from spatialcore.spatial.domains import (
     make_spatial_domains,
     get_domain_summary,
+    get_domain_polygons,
 )
 
 from spatialcore.spatial.distance import (
@@ -46,6 +47,7 @@ __all__ = [
     # Domain creation
     "make_spatial_domains",
     "get_domain_summary",
+    "get_domain_polygons",
     # Distance computation
     "calculate_domain_distances",
     "get_distance_matrix",

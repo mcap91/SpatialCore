@@ -297,6 +297,7 @@ def make_spatial_domains(
     output_column: str = "spatial_domain",
     assign_all_cells: bool = True,
     domain_expansion_warn_ratio: float = 10.0,
+    save_geojson: Optional[Union[str, Path]] = None,
     r_functions_path: Optional[Union[str, Path]] = None,
     copy: bool = False,
     platform: Optional[Literal["cosmx", "xenium", "visium"]] = None,
@@ -364,6 +365,10 @@ def make_spatial_domains(
     domain_expansion_warn_ratio
         Warn if (assigned cells / target cells) exceeds this ratio.
         Default: 10.0. Helps catch unexpected domain expansion.
+    save_geojson
+        Path to save domain polygon GeoJSON file. If None (default), polygons
+        are only stored in ``adata.uns['{output_column}_polygons']`` as a JSON
+        string. If provided, a copy is also written to this path.
     r_functions_path
         Path to R functions file. Uses bundled r_functions.R if None.
     copy
@@ -383,9 +388,10 @@ def make_spatial_domains(
     -------
     AnnData
         AnnData with domain assignments in ``adata.obs[output_column]``.
-        Cells not within any domain are labelled ``{domain_prefix}_0``.
+        Cells not within any domain are NaN (unassigned).
         Domains are numbered by size (largest domain = 1) for reproducible
-        workflows.
+        workflows. Domain polygon geometries are stored as a GeoJSON string
+        in ``adata.uns['{output_column}_polygons']``.
 
     Raises
     ------
@@ -580,6 +586,7 @@ def make_spatial_domains(
     with tempfile.TemporaryDirectory() as tmpdir:
         input_csv = Path(tmpdir) / "input.csv"
         output_csv = Path(tmpdir) / "output.csv"
+        output_geojson = Path(tmpdir) / "polygons.geojson"
 
         # Extract spatial coordinates
         spatial_coords = adata.obsm["spatial"]
@@ -617,7 +624,8 @@ make_spatial_domains(
     domain_prefix = '{domain_prefix}',
     min_target_cells_domain = {min_target_cells_domain},
     min_total_cells_domain = {min_total_cells_r},
-    assign_all_cells = {'TRUE' if assign_all_cells else 'FALSE'}
+    assign_all_cells = {'TRUE' if assign_all_cells else 'FALSE'},
+    output_geojson = '{str(output_geojson).replace(chr(92), "/")}'
 )
 """
 
@@ -655,44 +663,56 @@ make_spatial_domains(
         # Map domains to adata
         adata.obs[output_column] = adata.obs.index.map(domain_map)
 
-        # Convert "NA" strings and NaN values to {prefix}_0
-        outside_label = f"{domain_prefix}_0"
-        adata.obs[output_column] = adata.obs[output_column].replace(
-            {"NA": outside_label, "domain_NA": outside_label}
-        )
+        # Convert "NA" strings from R CSV to proper NaN (unassigned cells)
+        adata.obs[output_column] = adata.obs[output_column].replace({"NA": np.nan})
+        # NaN = cell not in any domain (background)
 
-        # Also handle domain_prefix_NA pattern
-        na_pattern = f"{domain_prefix}_NA"
-        adata.obs[output_column] = adata.obs[output_column].replace({na_pattern: outside_label})
+        # R already renumbered domains sequentially (largest = 1)
 
-        # Fill remaining NaN with {prefix}_0
-        adata.obs[output_column] = adata.obs[output_column].fillna(outside_label)
+        # Read polygon GeoJSON if R produced it
+        if output_geojson.exists():
+            try:
+                with open(output_geojson, "r") as f:
+                    geojson_data = json.load(f)
 
-        # Renumber domains sequentially (1 to m) by cell count, skipping _0
-        non_zero_mask = adata.obs[output_column] != outside_label
-        domain_counts = adata.obs.loc[non_zero_mask, output_column].value_counts()
-        if len(domain_counts) > 0:
-            # Create mapping: old_name -> domain_prefix_1, domain_prefix_2, ...
-            renumber_map = {}
-            for i, old_name in enumerate(domain_counts.index, start=1):
-                renumber_map[old_name] = f"{domain_prefix}_{i}"
+                # Enrich each feature with n_cells from final domain counts
+                domain_cell_counts = adata.obs[output_column].value_counts().to_dict()
+                for feature in geojson_data.get("features", []):
+                    domain_name = feature.get("properties", {}).get("domain", "")
+                    feature["properties"]["n_cells"] = domain_cell_counts.get(domain_name, 0)
 
-            # Apply renumbering (only to non-zero domains)
-            adata.obs[output_column] = adata.obs[output_column].map(
-                lambda x: renumber_map.get(x, x)
+                # Store as JSON string in adata.uns (survives h5ad round-trip)
+                adata.uns[f"{output_column}_polygons"] = json.dumps(geojson_data)
+                logger.info(
+                    f"Stored {len(geojson_data.get('features', []))} domain polygons "
+                    f"in adata.uns['{output_column}_polygons']"
+                )
+
+                # Save to user-specified path if requested
+                if save_geojson is not None:
+                    save_path = Path(save_geojson)
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(save_path, "w") as f:
+                        json.dump(geojson_data, f)
+                    logger.info(f"Saved domain polygons to {save_path}")
+
+            except Exception as e:
+                logger.warning(f"Could not read polygon GeoJSON: {e}")
+        else:
+            logger.warning(
+                "R did not produce polygon GeoJSON file. "
+                "Domain assignments are still valid but polygon geometries are unavailable."
             )
-            logger.debug(f"Renumbered {len(renumber_map)} domains to sequential 1-{len(renumber_map)}")
 
         # Clean up temporary filter column
         if "_filter" in adata.obs.columns:
             del adata.obs["_filter"]
 
-    # Calculate summary statistics (exclude _0 from counts)
-    outside_label = f"{domain_prefix}_0"
-    assigned_mask = adata.obs[output_column] != outside_label
+    # Calculate summary statistics (NaN = unassigned/background)
+    assigned_mask = adata.obs[output_column].notna()
     n_domains = adata.obs.loc[assigned_mask, output_column].nunique()
     n_assigned = assigned_mask.sum()
-    domains_list = adata.obs.loc[assigned_mask, output_column].unique().tolist()
+    domains_list = adata.obs.loc[assigned_mask, output_column].dropna().unique().tolist()
 
     logger.info(
         f"Created {n_domains} domains, assigned {n_assigned:,}/{adata.n_obs:,} cells "
@@ -785,9 +805,6 @@ def get_domain_summary(
 
     summaries = []
     for domain in domains.dropna().unique():
-        # Skip _0 (outside-domain) labels
-        if str(domain).endswith("_0"):
-            continue
         mask = domains == domain
         n_cells = mask.sum()
         coords = spatial[mask.values]
@@ -801,3 +818,46 @@ def get_domain_summary(
         })
 
     return pd.DataFrame(summaries).sort_values("n_cells", ascending=False)
+
+
+def get_domain_polygons(
+    adata: ad.AnnData,
+    domain_column: str = "spatial_domain",
+) -> Dict[str, Any]:
+    """
+    Retrieve domain polygon geometries as a GeoJSON FeatureCollection.
+
+    Parameters
+    ----------
+    adata
+        AnnData object with domain polygons stored by ``make_spatial_domains()``.
+    domain_column
+        Column name used for domain assignments. Polygons are looked up in
+        ``adata.uns['{domain_column}_polygons']``.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Parsed GeoJSON FeatureCollection with domain polygon features.
+        Each feature has properties: ``domain``, ``area``, ``n_cells``.
+
+    Raises
+    ------
+    KeyError
+        If polygon data is not found in ``adata.uns``.
+
+    Examples
+    --------
+    >>> from spatialcore.spatial import get_domain_polygons
+    >>> geojson = get_domain_polygons(adata, "spatial_domain")
+    >>> for feat in geojson["features"]:
+    ...     print(feat["properties"]["domain"], feat["properties"]["area"])
+    """
+    key = f"{domain_column}_polygons"
+    if key not in adata.uns:
+        raise KeyError(
+            f"No polygon data found at adata.uns['{key}']. "
+            "Run make_spatial_domains() first, or ensure it completed successfully."
+        )
+
+    return json.loads(adata.uns[key])

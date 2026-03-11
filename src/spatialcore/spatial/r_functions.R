@@ -277,7 +277,8 @@ make_spatial_domains <- function(input_csv, output_csv, group, group_subset,
                                  domain_prefix = "domain",
                                  min_target_cells_domain = 10,
                                  min_total_cells_domain = NULL,
-                                 assign_all_cells = TRUE) {
+                                 assign_all_cells = TRUE,
+                                 output_geojson = NULL) {
 
     # Create domains (internal helper)
     result <- .MakeDomains(
@@ -298,6 +299,34 @@ make_spatial_domains <- function(input_csv, output_csv, group, group_subset,
         group = group,
         group_subset = group_subset
     )
+
+    # Convert "prefix_NA" (from paste0(prefix, "_", NA)) back to real NA
+    na_label <- paste0(domain_prefix, "_NA")
+    result$cell_data$domain[result$cell_data$domain == na_label] <- NA_character_
+    result$polygon_data <- result$polygon_data[result$polygon_data$domain != na_label, ]
+
+    # Renumber domains to sequential 1..n (largest first by cell count)
+    old_domains <- na.omit(result$cell_data$domain)
+    if (length(unique(old_domains)) > 0) {
+        domain_counts <- sort(table(old_domains), decreasing = TRUE)
+        old_names <- names(domain_counts)
+        new_names <- paste0(domain_prefix, "_", seq_along(old_names))
+        rename_map <- setNames(new_names, old_names)
+
+        result$cell_data$domain <- rename_map[result$cell_data$domain]
+        result$polygon_data$domain <- rename_map[result$polygon_data$domain]
+
+        message(paste("Renumbered", length(old_names), "domains to sequential 1-", length(old_names)))
+    }
+
+    # Compute polygon areas
+    result$polygon_data$area <- as.numeric(sf::st_area(result$polygon_data))
+
+    # Export GeoJSON if requested
+    if (!is.null(output_geojson)) {
+        sf::st_write(result$polygon_data, output_geojson, driver = "GeoJSON", quiet = TRUE)
+        message(paste("Wrote polygon GeoJSON to", output_geojson))
+    }
 
     # Write output CSV
     write.csv(result$cell_data, output_csv, row.names = FALSE)

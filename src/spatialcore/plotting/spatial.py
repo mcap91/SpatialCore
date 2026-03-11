@@ -5,8 +5,9 @@ This module provides functions for visualizing cell annotations
 on spatial coordinates.
 """
 
+import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -520,6 +521,10 @@ def plot_domains(
     label_fontsize: int = 8,
     label_alpha: float = 0.7,
     label_min_domain_size: int = 0,
+    show_boundaries: bool = False,
+    boundary_color: Optional[Union[str, Dict[str, str]]] = None,
+    boundary_linewidth: float = 1.5,
+    boundary_alpha: float = 0.8,
     max_legend_items: int = 15,
     figsize: Tuple[float, float] = (14, 12),
     invert_y: bool = True,
@@ -530,8 +535,8 @@ def plot_domains(
     Plot spatial domains with colored cells and centroid labels.
 
     Renders domain cells in distinct colors with optional centroid labels.
-    Cells labelled ``{prefix}_0`` (outside all domains) are shown in light
-    grey and excluded from the legend.
+    Unassigned cells (NaN) are shown in light grey and excluded from the
+    legend.
 
     Parameters
     ----------
@@ -564,6 +569,19 @@ def plot_domains(
     label_min_domain_size
         Minimum number of cells in a domain to show its centroid label.
         0 means label all domains.
+    show_boundaries
+        If True, draw domain polygon boundary outlines from GeoJSON stored
+        in ``adata.uns['{domain_column}_polygons']``.
+    boundary_color
+        Color for boundary outlines. Accepts:
+
+        - ``None`` (default): match domain scatter point colors
+        - ``str``: single color for all boundaries (e.g. ``"white"``)
+        - ``Dict[str, str]``: per-domain color mapping
+    boundary_linewidth
+        Line width for boundary outlines.
+    boundary_alpha
+        Transparency of boundary outlines.
     max_legend_items
         Maximum number of domains to show in the legend.
     figsize
@@ -608,9 +626,8 @@ def plot_domains(
     coords = adata.obsm[spatial_key]
     domains = adata.obs[domain_column]
 
-    # Identify _0 (outside) domains
-    outside_domains = [d for d in domains.dropna().unique() if str(d).endswith("_0")]
-    outside_mask = domains.isin(outside_domains) | domains.isna()
+    # Identify unassigned (NaN) cells
+    outside_mask = domains.isna()
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -682,6 +699,45 @@ def plot_domains(
                 zorder=2,
             )
 
+    # Draw boundary outlines from GeoJSON polygons
+    if show_boundaries:
+        polygon_key = f"{domain_column}_polygons"
+        if polygon_key in adata.uns:
+            try:
+                geojson_data = json.loads(adata.uns[polygon_key])
+                for feature in geojson_data.get("features", []):
+                    domain_name = feature.get("properties", {}).get("domain", "")
+                    geometry = feature.get("geometry", {})
+                    rings = _extract_polygon_rings(geometry)
+
+                    # Resolve boundary color for this domain
+                    if boundary_color is None:
+                        bc = domain_colors.get(domain_name, "#888888")
+                    elif isinstance(boundary_color, str):
+                        bc = boundary_color
+                    elif isinstance(boundary_color, dict):
+                        bc = boundary_color.get(domain_name, "#888888")
+                    else:
+                        bc = "#888888"
+
+                    for ring in rings:
+                        xs = [pt[0] for pt in ring]
+                        ys = [pt[1] for pt in ring]
+                        ax.plot(
+                            xs, ys,
+                            color=bc,
+                            linewidth=boundary_linewidth,
+                            alpha=boundary_alpha,
+                            zorder=1.5,
+                        )
+            except Exception as e:
+                logger.warning(f"Could not render boundary outlines: {e}")
+        else:
+            logger.warning(
+                f"show_boundaries=True but no polygon data found at "
+                f"adata.uns['{polygon_key}']. Run make_spatial_domains() first."
+            )
+
     ax.set_xlabel("X", fontsize=12)
     ax.set_ylabel("Y", fontsize=12)
     ax.set_aspect("equal")
@@ -746,6 +802,37 @@ def _resolve_domain_colors(
         )
 
 
+def _extract_polygon_rings(geometry: Dict[str, Any]) -> List[List[List[float]]]:
+    """
+    Extract exterior coordinate rings from a GeoJSON geometry.
+
+    Parameters
+    ----------
+    geometry
+        GeoJSON geometry dict with ``type`` and ``coordinates``.
+
+    Returns
+    -------
+    List[List[List[float]]]
+        List of coordinate rings, where each ring is a list of [x, y] points.
+    """
+    geom_type = geometry.get("type", "")
+    coords = geometry.get("coordinates", [])
+    rings = []
+
+    if geom_type == "Polygon":
+        # First element is the exterior ring
+        if coords:
+            rings.append(coords[0])
+    elif geom_type == "MultiPolygon":
+        # Each polygon has its own exterior ring
+        for polygon_coords in coords:
+            if polygon_coords:
+                rings.append(polygon_coords[0])
+
+    return rings
+
+
 def plot_domain_distances(
     adata: ad.AnnData,
     source_domain_column: str,
@@ -754,12 +841,13 @@ def plot_domain_distances(
     distance_key: str = "domain_distances",
     domain_colors: Optional[Union[str, Dict[str, str]]] = None,
     top_n_connections: int = 1,
-    line_cmap: str = "coolwarm_r",
+    line_cmap: str = "viridis",
     line_width: float = 2.0,
     point_size: float = 0.5,
     point_alpha: float = 0.3,
     domain_point_size: float = 3.0,
     domain_point_alpha: float = 0.7,
+    label_color: str = "white",
     figsize: Tuple[float, float] = (14, 12),
     title: Optional[str] = None,
     save: Optional[Union[str, Path]] = None,
@@ -794,7 +882,7 @@ def plot_domain_distances(
         Number of closest connections to show per domain. Default 1 shows only
         the nearest neighbor for each domain. Set to 0 or None to show all.
     line_cmap
-        Colormap for distance lines (default coolwarm_r: blue=close, red=far).
+        Colormap for distance lines (default viridis: yellow=close, purple=far).
     line_width
         Width of distance lines.
     point_size
@@ -805,6 +893,8 @@ def plot_domain_distances(
         Size of domain cell scatter points.
     domain_point_alpha
         Transparency of domain cell scatter points.
+    label_color
+        Color of domain number labels at centroids. Default ``"white"``.
     figsize
         Figure size.
     title
@@ -880,11 +970,11 @@ def plot_domain_distances(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Get domain masks (exclude _0 outside labels)
+    # Get domain masks (NaN = unassigned)
     source_vals = adata.obs[source_domain_column]
     target_vals = adata.obs[target_domain_column]
-    source_mask = source_vals.notna() & ~source_vals.astype(str).str.endswith("_0")
-    target_mask = target_vals.notna() & ~target_vals.astype(str).str.endswith("_0")
+    source_mask = source_vals.notna()
+    target_mask = target_vals.notna()
     domain_mask = source_mask | target_mask
     background_mask = ~domain_mask
 
@@ -900,13 +990,10 @@ def plot_domain_distances(
             zorder=0,
         )
 
-    # Get unique domains for coloring (exclude _0 outside labels)
+    # Get unique domains for coloring (NaN already excluded by dropna)
     source_domains = adata.obs[source_domain_column].dropna().unique()
     target_domains = adata.obs[target_domain_column].dropna().unique()
-    unique_domains = sorted(
-        d for d in set(source_domains) | set(target_domains)
-        if not str(d).endswith("_0")
-    )
+    unique_domains = sorted(set(source_domains) | set(target_domains))
     resolved_colors = _resolve_domain_colors(unique_domains, domain_colors)
 
     # Plot domain cells colored by domain
@@ -1012,7 +1099,7 @@ def plot_domain_distances(
             fontweight="bold",
             ha="center",
             va="center",
-            color="white",
+            color=label_color,
             zorder=4,
         )
 
