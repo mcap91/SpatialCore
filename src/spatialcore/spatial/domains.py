@@ -383,8 +383,9 @@ def make_spatial_domains(
     -------
     AnnData
         AnnData with domain assignments in ``adata.obs[output_column]``.
-        Cells not within any domain have NaN. Domains are numbered by size
-        (largest domain = 1) for reproducible workflows.
+        Cells not within any domain are labelled ``{domain_prefix}_0``.
+        Domains are numbered by size (largest domain = 1) for reproducible
+        workflows.
 
     Raises
     ------
@@ -654,26 +655,31 @@ make_spatial_domains(
         # Map domains to adata
         adata.obs[output_column] = adata.obs.index.map(domain_map)
 
-        # Convert "NA" strings to actual NaN
+        # Convert "NA" strings and NaN values to {prefix}_0
+        outside_label = f"{domain_prefix}_0"
         adata.obs[output_column] = adata.obs[output_column].replace(
-            {"NA": np.nan, "domain_NA": np.nan}
+            {"NA": outside_label, "domain_NA": outside_label}
         )
 
         # Also handle domain_prefix_NA pattern
         na_pattern = f"{domain_prefix}_NA"
-        adata.obs[output_column] = adata.obs[output_column].replace({na_pattern: np.nan})
+        adata.obs[output_column] = adata.obs[output_column].replace({na_pattern: outside_label})
 
-        # Renumber domains sequentially (1 to m) by cell count
-        domain_counts = adata.obs[output_column].value_counts()
+        # Fill remaining NaN with {prefix}_0
+        adata.obs[output_column] = adata.obs[output_column].fillna(outside_label)
+
+        # Renumber domains sequentially (1 to m) by cell count, skipping _0
+        non_zero_mask = adata.obs[output_column] != outside_label
+        domain_counts = adata.obs.loc[non_zero_mask, output_column].value_counts()
         if len(domain_counts) > 0:
             # Create mapping: old_name -> domain_prefix_1, domain_prefix_2, ...
             renumber_map = {}
             for i, old_name in enumerate(domain_counts.index, start=1):
                 renumber_map[old_name] = f"{domain_prefix}_{i}"
 
-            # Apply renumbering
+            # Apply renumbering (only to non-zero domains)
             adata.obs[output_column] = adata.obs[output_column].map(
-                lambda x: renumber_map.get(x, x) if pd.notna(x) else x
+                lambda x: renumber_map.get(x, x)
             )
             logger.debug(f"Renumbered {len(renumber_map)} domains to sequential 1-{len(renumber_map)}")
 
@@ -681,10 +687,12 @@ make_spatial_domains(
         if "_filter" in adata.obs.columns:
             del adata.obs["_filter"]
 
-    # Calculate summary statistics
-    n_domains = adata.obs[output_column].nunique()
-    n_assigned = adata.obs[output_column].notna().sum()
-    domains_list = adata.obs[output_column].dropna().unique().tolist()
+    # Calculate summary statistics (exclude _0 from counts)
+    outside_label = f"{domain_prefix}_0"
+    assigned_mask = adata.obs[output_column] != outside_label
+    n_domains = adata.obs.loc[assigned_mask, output_column].nunique()
+    n_assigned = assigned_mask.sum()
+    domains_list = adata.obs.loc[assigned_mask, output_column].unique().tolist()
 
     logger.info(
         f"Created {n_domains} domains, assigned {n_assigned:,}/{adata.n_obs:,} cells "
@@ -777,6 +785,9 @@ def get_domain_summary(
 
     summaries = []
     for domain in domains.dropna().unique():
+        # Skip _0 (outside-domain) labels
+        if str(domain).endswith("_0"):
+            continue
         mask = domains == domain
         n_cells = mask.sum()
         coords = spatial[mask.values]

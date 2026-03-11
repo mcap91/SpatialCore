@@ -44,6 +44,7 @@ from spatialcore.plotting.spatial import (
     plot_spatial_confidence,
     plot_spatial_gene,
     plot_spatial_multi_gene,
+    plot_domains,
     plot_domain_distances,
 )
 
@@ -100,6 +101,7 @@ __all__ = [
     "plot_spatial_confidence",
     "plot_spatial_gene",
     "plot_spatial_multi_gene",
+    "plot_domains",
     "plot_domain_distances",
     # Validation
     "plot_marker_heatmap",

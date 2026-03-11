@@ -507,12 +507,252 @@ def plot_spatial_multi_gene(
     return fig
 
 
+def plot_domains(
+    adata: ad.AnnData,
+    domain_column: str,
+    spatial_key: str = "spatial",
+    color: Optional[Union[str, Dict[str, str]]] = None,
+    point_size: float = 0.5,
+    domain_point_size: float = 3.0,
+    alpha: float = 0.3,
+    domain_alpha: float = 0.7,
+    show_labels: bool = True,
+    label_fontsize: int = 8,
+    label_alpha: float = 0.7,
+    label_min_domain_size: int = 0,
+    max_legend_items: int = 15,
+    figsize: Tuple[float, float] = (14, 12),
+    invert_y: bool = True,
+    title: Optional[str] = None,
+    save: Optional[Union[str, Path]] = None,
+) -> Figure:
+    """
+    Plot spatial domains with colored cells and centroid labels.
+
+    Renders domain cells in distinct colors with optional centroid labels.
+    Cells labelled ``{prefix}_0`` (outside all domains) are shown in light
+    grey and excluded from the legend.
+
+    Parameters
+    ----------
+    adata
+        AnnData with spatial coordinates and domain assignments.
+    domain_column
+        Column in ``adata.obs`` containing domain labels.
+    spatial_key
+        Key in ``adata.obsm`` for spatial coordinates.
+    color
+        Domain coloring. Accepts:
+
+        - ``None`` (default): auto-generate via ``generate_celltype_palette``
+        - ``str``: single hex color applied to ALL domains (e.g. ``"#FF0000"``)
+        - ``Dict[str, str]``: per-domain mapping (e.g. ``{"Bcell_1": "#FF0000"}``)
+    point_size
+        Size of background (outside-domain) scatter points.
+    domain_point_size
+        Size of domain cell scatter points.
+    alpha
+        Transparency of background points.
+    domain_alpha
+        Transparency of domain cell points.
+    show_labels
+        If True, annotate domain name at centroid.
+    label_fontsize
+        Font size for centroid labels.
+    label_alpha
+        Transparency of the label background box.
+    label_min_domain_size
+        Minimum number of cells in a domain to show its centroid label.
+        0 means label all domains.
+    max_legend_items
+        Maximum number of domains to show in the legend.
+    figsize
+        Figure size.
+    invert_y
+        If True, invert Y axis (standard for image coordinates).
+    title
+        Plot title.
+    save
+        Path to save figure.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure.
+
+    Examples
+    --------
+    >>> from spatialcore.plotting import plot_domains
+    >>> fig = plot_domains(adata, domain_column="bcell_domain")
+
+    Custom colors per domain:
+
+    >>> fig = plot_domains(
+    ...     adata,
+    ...     domain_column="bcell_domain",
+    ...     color={"Bcell_1": "#FF0000", "Bcell_2": "#0000FF"},
+    ... )
+    """
+    if domain_column not in adata.obs.columns:
+        raise ValueError(
+            f"Domain column '{domain_column}' not found in adata.obs. "
+            f"Available columns: {list(adata.obs.columns)}"
+        )
+
+    if spatial_key not in adata.obsm:
+        raise ValueError(
+            f"Spatial key '{spatial_key}' not found in adata.obsm. "
+            f"Available: {list(adata.obsm.keys())}"
+        )
+
+    coords = adata.obsm[spatial_key]
+    domains = adata.obs[domain_column]
+
+    # Identify _0 (outside) domains
+    outside_domains = [d for d in domains.dropna().unique() if str(d).endswith("_0")]
+    outside_mask = domains.isin(outside_domains) | domains.isna()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Background (outside-domain) cells in grey
+    if outside_mask.any():
+        ax.scatter(
+            coords[outside_mask.values, 0],
+            coords[outside_mask.values, 1],
+            c="lightgrey",
+            s=point_size,
+            alpha=alpha,
+            rasterized=True,
+            zorder=0,
+        )
+
+    # Get valid domains sorted by size (largest first)
+    valid_domains = domains[~outside_mask].dropna()
+    if len(valid_domains) == 0:
+        plt.close(fig)
+        raise ValueError(f"No valid domains found in '{domain_column}'")
+
+    domain_counts = valid_domains.value_counts()
+    domain_counts = domain_counts[domain_counts > 0]  # drop unused categories
+    unique_domains = domain_counts.index.tolist()
+
+    # Resolve colors
+    domain_colors = _resolve_domain_colors(unique_domains, color)
+
+    legend_handles = []
+    legend_labels = []
+
+    for i, domain in enumerate(unique_domains):
+        mask = domains == domain
+        domain_coords = coords[mask.values]
+        n_cells = mask.sum()
+        c = domain_colors[domain]
+
+        scatter = ax.scatter(
+            domain_coords[:, 0],
+            domain_coords[:, 1],
+            c=[c],
+            s=domain_point_size,
+            alpha=domain_alpha,
+            rasterized=True,
+            zorder=1,
+        )
+
+        if i < max_legend_items:
+            legend_handles.append(scatter)
+            legend_labels.append(f"{domain} ({n_cells:,})")
+
+        # Centroid label
+        if show_labels and n_cells >= label_min_domain_size:
+            centroid_x = domain_coords[:, 0].mean()
+            centroid_y = domain_coords[:, 1].mean()
+            ax.annotate(
+                domain,
+                (centroid_x, centroid_y),
+                fontsize=label_fontsize,
+                fontweight="bold",
+                color="black",
+                ha="center",
+                va="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    facecolor="white",
+                    alpha=label_alpha,
+                ),
+                zorder=2,
+            )
+
+    ax.set_xlabel("X", fontsize=12)
+    ax.set_ylabel("Y", fontsize=12)
+    ax.set_aspect("equal")
+    if invert_y:
+        ax.invert_yaxis()
+
+    if title is None:
+        title = f"Spatial Domains ({domain_column})"
+    ax.set_title(title, fontsize=14, fontweight="bold")
+
+    if legend_handles:
+        ax.legend(
+            legend_handles,
+            legend_labels,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            markerscale=3,
+            fontsize=9,
+        )
+
+    plt.tight_layout()
+
+    if save:
+        save_figure(fig, save)
+
+    return fig
+
+
+def _resolve_domain_colors(
+    unique_domains: List[str],
+    color: Optional[Union[str, Dict[str, str]]],
+) -> Dict[str, str]:
+    """
+    Resolve domain colors from user input.
+
+    Parameters
+    ----------
+    unique_domains
+        Sorted list of domain names.
+    color
+        None (auto), str (single hex), or dict (per-domain).
+
+    Returns
+    -------
+    Dict[str, str]
+        Mapping from domain name to hex color string.
+    """
+    if color is None:
+        return generate_celltype_palette(unique_domains)
+    elif isinstance(color, str):
+        return {d: color for d in unique_domains}
+    elif isinstance(color, dict):
+        # Fill missing domains with auto palette
+        missing = [d for d in unique_domains if d not in color]
+        if missing:
+            auto = generate_celltype_palette(missing)
+            return {**auto, **color}
+        return dict(color)
+    else:
+        raise TypeError(
+            f"color must be None, str, or dict, got {type(color).__name__}"
+        )
+
+
 def plot_domain_distances(
     adata: ad.AnnData,
     source_domain_column: str,
     target_domain_column: Optional[str] = None,
     spatial_key: str = "spatial",
     distance_key: str = "domain_distances",
+    domain_colors: Optional[Union[str, Dict[str, str]]] = None,
     top_n_connections: int = 1,
     line_cmap: str = "coolwarm_r",
     line_width: float = 2.0,
@@ -544,6 +784,12 @@ def plot_domain_distances(
         Key in adata.obsm for spatial coordinates.
     distance_key
         Key in adata.uns containing distance matrix from calculate_domain_distances().
+    domain_colors
+        Domain coloring. Accepts:
+
+        - ``None`` (default): auto-generate via ``generate_celltype_palette``
+        - ``str``: single hex color applied to ALL domains
+        - ``Dict[str, str]``: per-domain mapping
     top_n_connections
         Number of closest connections to show per domain. Default 1 shows only
         the nearest neighbor for each domain. Set to 0 or None to show all.
@@ -634,9 +880,11 @@ def plot_domain_distances(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Get domain masks
-    source_mask = adata.obs[source_domain_column].notna()
-    target_mask = adata.obs[target_domain_column].notna()
+    # Get domain masks (exclude _0 outside labels)
+    source_vals = adata.obs[source_domain_column]
+    target_vals = adata.obs[target_domain_column]
+    source_mask = source_vals.notna() & ~source_vals.astype(str).str.endswith("_0")
+    target_mask = target_vals.notna() & ~target_vals.astype(str).str.endswith("_0")
     domain_mask = source_mask | target_mask
     background_mask = ~domain_mask
 
@@ -652,15 +900,14 @@ def plot_domain_distances(
             zorder=0,
         )
 
-    # Get unique domains for coloring
+    # Get unique domains for coloring (exclude _0 outside labels)
     source_domains = adata.obs[source_domain_column].dropna().unique()
     target_domains = adata.obs[target_domain_column].dropna().unique()
-    unique_domains = sorted(set(source_domains) | set(target_domains))
-    n_colors = min(20, len(unique_domains))
-    domain_colors = dict(zip(
-        unique_domains,
-        plt.cm.tab20(np.linspace(0, 1, n_colors))
-    ))
+    unique_domains = sorted(
+        d for d in set(source_domains) | set(target_domains)
+        if not str(d).endswith("_0")
+    )
+    resolved_colors = _resolve_domain_colors(unique_domains, domain_colors)
 
     # Plot domain cells colored by domain
     for domain in unique_domains:
@@ -671,7 +918,7 @@ def plot_domain_distances(
             ax.scatter(
                 coords[mask.values, 0],
                 coords[mask.values, 1],
-                c=[domain_colors[domain]],
+                c=[resolved_colors[domain]],
                 s=domain_point_size,
                 alpha=domain_point_alpha,
                 rasterized=True,
@@ -752,7 +999,7 @@ def plot_domain_distances(
         ax.scatter(
             centroid[0],
             centroid[1],
-            c=[domain_colors.get(domain, "#888888")],
+            c=[resolved_colors.get(domain, "#888888")],
             s=100,
             edgecolors="white",
             linewidths=1.5,
